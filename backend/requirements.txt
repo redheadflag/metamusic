@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+mutagen
+aiogram>=3.0
+python-dotenv
+httpx
+yt-dlp
+requests
