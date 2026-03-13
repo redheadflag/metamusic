@@ -4,21 +4,70 @@ import MetaEditor from "./MetaEditor.jsx";
 
 const API = "/api";
 
+function ProgressBar({ progress, label }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>{label}</p>
+      <div style={{
+        height: 4,
+        borderRadius: 2,
+        background: "var(--border)",
+        overflow: "hidden",
+      }}>
+        <div style={{
+          height: "100%",
+          width: `${progress}%`,
+          background: "var(--accent)",
+          borderRadius: 2,
+          transition: progress > 0 ? "width 0.1s ease" : "none",
+        }} />
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text)", opacity: 0.4, textAlign: "right" }}>
+        {progress < 100 ? `${progress}%` : "Processing…"}
+      </p>
+    </div>
+  );
+}
+
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable)
+        onProgress(Math.round((e.loaded / e.total) * 100));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(xhr.responseText));
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Network error")));
+    xhr.send(formData);
+  });
+}
+
 export default function App() {
-  const [state, setState]   = useState("idle");
-  const [tracks, setTracks] = useState([]);
-  const [saved,  setSaved]  = useState([]);
-  const [error,  setError]  = useState(null);
+  const [state,    setState]    = useState("idle");
+  const [progress, setProgress] = useState(0);
+  const [tracks,   setTracks]   = useState([]);
+  const [saved,    setSaved]    = useState([]);
+  const [error,    setError]    = useState(null);
 
   async function handleFiles(files) {
     setState("uploading");
+    setProgress(0);
     setError(null);
     try {
       const body = new FormData();
       files.forEach((f) => body.append("files", f));
-      const res  = await fetch(`${API}/upload`, { method: "POST", body });
-      if (!res.ok) throw new Error(await res.text());
-      setTracks(await res.json());
+      const data = await uploadWithProgress(`${API}/upload`, body, setProgress);
+      setTracks(data);
       setState("editing");
     } catch (e) {
       setError(e.message);
@@ -44,7 +93,7 @@ export default function App() {
     }
   }
 
-  function reset() { setTracks([]); setSaved([]); setState("idle"); }
+  function reset() { setTracks([]); setSaved([]); setProgress(0); setState("idle"); }
 
   return (
     <>
@@ -56,7 +105,7 @@ export default function App() {
         alignItems: "center",
         justifyContent: "space-between",
       }}>
-        <h1>Upload to music.redheadflag.com</h1>
+        <h1>metamusic</h1>
         {state === "editing" && (
           <span style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>
             {tracks.length} track{tracks.length !== 1 ? "s" : ""}
@@ -67,15 +116,11 @@ export default function App() {
       {state === "idle" && <UploadZone onFiles={handleFiles} />}
 
       {state === "uploading" && (
-        <p style={{ color: "var(--text)", opacity: 0.5 }}>Reading metadata…</p>
+        <ProgressBar progress={progress} label="Uploading…" />
       )}
 
       {state === "editing" && (
-        <MetaEditor
-          tracks={tracks}
-          onConfirm={handleConfirm}
-          onReset={reset}
-        />
+        <MetaEditor tracks={tracks} onConfirm={handleConfirm} onReset={reset} />
       )}
 
       {state === "saving" && (

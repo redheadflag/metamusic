@@ -10,7 +10,7 @@ Album upload flow
    • if any missing → state: fixing_shared, ask one by one
 5. Bot checks per-track title
    • if missing     → state: fixing_track_title, ask one by one
-6. Bot embeds metadata, moves files to OUTPUT_DIR/<album_artist>/<album>/
+6. Bot embeds metadata, moves files to MUSIC_LIBRARY_PATH/<album_artist>/<album>/
 7. Done — back to main menu
 
 Note: Telegram's Bot API only exposes title, performer, and thumbnail on the
@@ -37,7 +37,7 @@ from yt_sc_fetch.utils import safe_name
 router = Router()
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "output")
+MUSIC_LIBRARY_PATH = os.environ.get("MUSIC_LIBRARY_PATH", "output")
 
 SHARED_FIELDS = ("artist", "album_artist", "album")
 SHARED_PROMPTS = {
@@ -387,7 +387,7 @@ async def _process_album(message: Message, state: FSMContext) -> None:
             cover_art = f.read()
 
     out_dir = os.path.join(
-        OUTPUT_DIR,
+        MUSIC_LIBRARY_PATH,
         safe_name(shared["album_artist"]),
         safe_name(shared["album"]),
     )

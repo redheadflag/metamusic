@@ -268,12 +268,12 @@ def fetch_cover_art(track_info: dict) -> bytes | None:
         return None
 
 
-def download_sc_track(track: dict, output_dir: str) -> str:
+def download_sc_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
     url = _track_url(track)
     if not url:
         die("Could not determine a URL for the selected SoundCloud track.")
     log(f"Downloading: {url}")
-    output_tmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
+    output_tmpl = os.path.join(MUSIC_LIBRARY_PATH, "%(id)s.%(ext)s")
     result = run([
         "yt-dlp",
         "--no-playlist",
@@ -288,9 +288,9 @@ def download_sc_track(track: dict, output_dir: str) -> str:
     ])
     if result.returncode != 0:
         die(f"yt-dlp download failed:\n{result.stderr}")
-    for fname in os.listdir(output_dir):
+    for fname in os.listdir(MUSIC_LIBRARY_PATH):
         if fname.endswith(".mp3"):
-            return os.path.join(output_dir, fname)
+            return os.path.join(MUSIC_LIBRARY_PATH, fname)
     die("yt-dlp finished but no .mp3 file was produced.")
 
 
@@ -338,7 +338,7 @@ def embed_metadata(mp3_path: str, meta: dict, cover_art: bytes | None) -> None:
 # Process a single track entry end-to-end
 # ---------------------------------------------------------------------------
 
-def process_entry(raw: dict, output_dir: str, track_number: int | None = None) -> str | None:
+def process_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None = None) -> str | None:
     """
     Process one YouTube entry (video).
     Returns None on success, or a human-readable label string if skipped.
@@ -357,7 +357,7 @@ def process_entry(raw: dict, output_dir: str, track_number: int | None = None) -
     cover_art     = fetch_cover_art(sc_track_full)
 
     # Build output path:  output/<album_artist>/<album>/<artist> — <track>.mp3
-    out_dir = os.path.join(output_dir, safe_name(meta["album_artist"]), safe_name(meta["album"]))
+    out_dir = os.path.join(MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"]))
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"
     final_path = os.path.join(out_dir, safe_file_name)
@@ -484,7 +484,7 @@ def validate_sc_overrides(overrides: dict, is_playlist: bool) -> None:
         )
 
 
-def process_sc_entry(raw: dict, output_dir: str, track_number: int | None = None,
+def process_sc_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None = None,
                      overrides: dict | None = None) -> None:
     """Parse SC metadata from one raw entry, display it, download and tag."""
     meta      = parse_sc_metadata(raw, track_number=track_number)
@@ -495,7 +495,7 @@ def process_sc_entry(raw: dict, output_dir: str, track_number: int | None = None
     display_metadata(meta)
 
     # Build output path:  output/<album_artist>/<album>/<artist> — <track>.mp3
-    out_dir = os.path.join(output_dir, safe_name(meta["album_artist"]), safe_name(meta["album"]))
+    out_dir = os.path.join(MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"]))
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"
     final_path = os.path.join(out_dir, safe_file_name)
@@ -555,8 +555,8 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    output_dir = "output"
-    os.makedirs(output_dir, exist_ok=True)
+    MUSIC_LIBRARY_PATH = "output"
+    os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 
     overrides = {
         "artist":       args.artist,
@@ -585,7 +585,7 @@ def main() -> None:
                     log(f"\n[{i}/{len(entries)}]")
                 track_number = i if is_playlist else None
                 process_sc_entry(
-                    raw, output_dir,
+                    raw, MUSIC_LIBRARY_PATH,
                     track_number=track_number,
                     overrides=overrides if has_overrides else None,
                 )
@@ -611,7 +611,7 @@ def main() -> None:
         for i, raw in enumerate(entries, 1):
             log(f"\n[{i}/{len(entries)}]")
             track_number = i if is_playlist else None
-            skipped = process_entry(raw, output_dir=output_dir, track_number=track_number)
+            skipped = process_entry(raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number)
             if skipped:
                 skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
 
