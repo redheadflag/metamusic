@@ -8,7 +8,7 @@ from models import TrackMeta, ProcessRequest
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = "/music"
+MUSIC_LIBRARY_PATH = "/music"
 
 
 def _safe(s: str) -> str:
@@ -137,7 +137,7 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
 
 
 # ---------------------------------------------------------------------------
-# Embed tags and save to OUTPUT_DIR
+# Embed tags and save to MUSIC_LIBRARY_PATH
 # ---------------------------------------------------------------------------
 
 def _source_bitrate(path: str) -> int:
@@ -223,7 +223,7 @@ def _to_mp3(src: str, dest: str, meta: dict, cover_bytes: Optional[bytes]) -> No
 
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Convert every track to MP3 (≤256 kbps), embed metadata, save to OUTPUT_DIR.
+    Convert every track to MP3 (≤256 kbps), embed metadata, save to MUSIC_LIBRARY_PATH.
     Single track uploads get album = "<title> (Single)" and no track number prefix.
     """
     is_single = req.is_single
@@ -250,7 +250,7 @@ def process_album(req: ProcessRequest) -> list[str]:
         }
 
         out_dir = os.path.join(
-            OUTPUT_DIR,
+            MUSIC_LIBRARY_PATH,
             _safe(req.album_artist),
             _safe(album),
         )

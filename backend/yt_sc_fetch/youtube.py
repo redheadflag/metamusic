@@ -39,7 +39,7 @@ def fetch_yt_entries(url: str) -> list[dict]:
     return entries
 
 
-def process_yt_entry(raw: dict, output_dir: str,
+def process_yt_entry(raw: dict, MUSIC_LIBRARY_PATH: str,
                      track_number: int | None = None) -> str | None:
     """
     Process one YouTube entry end-to-end.
@@ -58,7 +58,7 @@ def process_yt_entry(raw: dict, output_dir: str,
     cover_art     = fetch_cover_art(sc_track_full)
 
     out_dir = os.path.join(
-        output_dir, safe_name(meta["album_artist"]), safe_name(meta["album"])
+        MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"])
     )
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"

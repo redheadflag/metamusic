@@ -52,7 +52,7 @@ def _track_url(track: dict) -> str:
     )
 
 
-def download_track(track: dict, output_dir: str) -> str:
+def download_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
     """
     Download a track (SC or any yt-dlp-supported source) as MP3.
     Returns the path to the produced .mp3 file.
@@ -62,7 +62,7 @@ def download_track(track: dict, output_dir: str) -> str:
         die("Could not determine a URL for the selected track.")
 
     log(f"Downloading: {url}")
-    output_tmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
+    output_tmpl = os.path.join(MUSIC_LIBRARY_PATH, "%(id)s.%(ext)s")
     result = run([
         "yt-dlp",
         "--no-playlist",
@@ -78,9 +78,9 @@ def download_track(track: dict, output_dir: str) -> str:
     if result.returncode != 0:
         die(f"yt-dlp download failed:\n{result.stderr}")
 
-    for fname in os.listdir(output_dir):
+    for fname in os.listdir(MUSIC_LIBRARY_PATH):
         if fname.endswith(".mp3"):
-            return os.path.join(output_dir, fname)
+            return os.path.join(MUSIC_LIBRARY_PATH, fname)
 
     die("yt-dlp finished but no .mp3 file was produced.")
 

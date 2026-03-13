@@ -130,7 +130,7 @@ def fetch_sc_entries(sc_url: str) -> list[dict]:
 # Process one SC entry end-to-end
 # ---------------------------------------------------------------------------
 
-def process_sc_entry(raw: dict, output_dir: str,
+def process_sc_entry(raw: dict, MUSIC_LIBRARY_PATH: str,
                      track_number: int | None = None,
                      overrides: dict | None = None) -> None:
     """Parse SC metadata, apply overrides, display, download, tag, and save."""
@@ -142,7 +142,7 @@ def process_sc_entry(raw: dict, output_dir: str,
     display_metadata(meta)
 
     out_dir = os.path.join(
-        output_dir, safe_name(meta["album_artist"]), safe_name(meta["album"])
+        MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"])
     )
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"

@@ -1,14 +1,14 @@
 services:
   backend:
-    build: .
+    build: ./backend
     restart: unless-stopped
-    env_file: ../.env
+    env_file: .env
     volumes:
-      - ${OUTPUT_DIR}:/music
+      - ${MUSIC_LIBRARY_PATH}:/music
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     develop:
       watch:
         - action: sync+restart
-          path: .
+          path: ./backend
           target: /app

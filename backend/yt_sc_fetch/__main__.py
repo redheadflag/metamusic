@@ -71,8 +71,8 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    output_dir = "output"
-    os.makedirs(output_dir, exist_ok=True)
+    MUSIC_LIBRARY_PATH = "output"
+    os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 
     overrides = {
         "artist":       args.artist,
@@ -101,7 +101,7 @@ def main() -> None:
                     log(f"\n[{i}/{len(entries)}]")
                 track_number = i if is_playlist else None
                 process_sc_entry(
-                    raw, output_dir,
+                    raw, MUSIC_LIBRARY_PATH,
                     track_number=track_number,
                     overrides=overrides if has_overrides else None,
                 )
@@ -127,7 +127,7 @@ def main() -> None:
         for i, raw in enumerate(entries, 1):
             log(f"\n[{i}/{len(entries)}]")
             track_number = i if is_playlist else None
-            skipped = process_yt_entry(raw, output_dir=output_dir, track_number=track_number)
+            skipped = process_yt_entry(raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number)
             if skipped:
                 skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
 
