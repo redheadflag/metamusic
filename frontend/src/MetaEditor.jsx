@@ -13,7 +13,6 @@ const Field = ({ label, value, onChange, required }) => (
   </div>
 );
 
-// Drag handle icon (three horizontal lines)
 const DragHandle = () => (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
     style={{ flexShrink: 0, cursor: "grab", opacity: 0.35 }}>
@@ -23,8 +22,54 @@ const DragHandle = () => (
   </svg>
 );
 
+const SegmentedControl = ({ value, onChange }) => {
+  const options = [
+    { value: "single", label: "Single" },
+    { value: "album",  label: "Song from album" },
+  ];
+  return (
+    <div style={{
+      display: "flex",
+      background: "var(--code-bg)",
+      border: "1px solid var(--border)",
+      borderRadius: 8,
+      padding: 3,
+      gap: 2,
+    }}>
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            style={{
+              flex: 1,
+              padding: "6px 14px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: 13,
+              fontWeight: active ? 500 : 400,
+              background: active ? "var(--bg)" : "transparent",
+              color: active ? "var(--text-h)" : "var(--text)",
+              boxShadow: active ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              transition: "background 0.15s, color 0.15s, box-shadow 0.15s",
+              cursor: "pointer",
+              textAlign: "center",
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function MetaEditor({ tracks, onConfirm, onReset }) {
   const first = tracks[0];
+
+  const [mode, setMode] = useState(tracks.length === 1 ? "single" : "album");
+  const isSingle = mode === "single";
 
   const [shared, setShared] = useState({
     artist:        first.artist,
@@ -34,25 +79,21 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
     cover_art_b64: first.cover_art_b64 ?? null,
   });
 
-  // Single source of truth: rows ordered by current track number
   const [rows, setRows] = useState(() =>
     [...tracks]
-      .sort((a, b) => a.track_number - b.track_number)
-      .map((t) => ({ track: t, title: t.title }))
+      .sort((a, b) => (a.track_number ?? 0) - (b.track_number ?? 0))
+      .map((t, i) => ({
+        track:        t,
+        title:        t.title,
+        track_number: t.track_number ?? i + 1,
+      }))
   );
 
-  // Drag state
   const dragIndex = useRef(null);
   const [overIndex, setOverIndex] = useState(null);
 
-  function onDragStart(i) {
-    dragIndex.current = i;
-  }
-
-  function onDragEnter(i) {
-    setOverIndex(i);
-  }
-
+  function onDragStart(i) { dragIndex.current = i; }
+  function onDragEnter(i) { setOverIndex(i); }
   function onDragEnd() {
     const from = dragIndex.current;
     const to   = overIndex;
@@ -61,7 +102,8 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         const next = [...prev];
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
-        return next;
+        // reassign track numbers to match new positions
+        return next.map((r, i) => ({ ...r, track_number: i + 1 }));
       });
     }
     dragIndex.current = null;
@@ -83,17 +125,29 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
     reader.readAsDataURL(file);
   }
 
-  const missing = !shared.artist || !shared.album || rows.some((r) => !r.title.trim());
+  const missing =
+    !shared.artist ||
+    (!isSingle && !shared.album) ||
+    rows.some((r) => !r.title.trim());
 
   function confirm() {
     onConfirm({
       ...shared,
-      tracks: rows.map((r, i) => ({ ...r.track, title: r.title, track_number: i + 1 })),
+      is_single: isSingle,
+      album: isSingle ? "" : shared.album,
+      tracks: rows.map((r) => ({
+        ...r.track,
+        title:        r.title,
+        track_number: isSingle ? null : r.track_number,
+      })),
     });
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+      {/* Mode toggle — only relevant when a single file is uploaded */}
+      {tracks.length === 1 && <SegmentedControl value={mode} onChange={setMode} />}
 
       {/* Cover + shared fields */}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
@@ -119,10 +173,28 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           <div style={{ gridColumn: "1 / -1" }}>
             <Field label="Artist" value={shared.artist} onChange={set("artist")} required />
           </div>
-          <Field label="Album" value={shared.album}        onChange={set("album")}        required />
-          <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
+
+          {isSingle ? (
+            <Field label="Year" value={shared.release_year} onChange={set("release_year")} />
+          ) : (
+            <>
+              <Field label="Album" value={shared.album}        onChange={set("album")}        required />
+              <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
+            </>
+          )}
         </div>
       </div>
+
+      {/* Single hint */}
+      {isSingle && (
+        <div style={{
+          fontSize: 12, color: "var(--text)", opacity: 0.5,
+          padding: "8px 10px", borderRadius: 7,
+          border: "1px solid var(--border)", background: "var(--code-bg)",
+        }}>
+          Album name will be set to <em>{rows[0]?.title.trim() || "track title"} (Single)</em>
+        </div>
+      )}
 
       <div style={{ borderTop: "1px solid var(--border)" }} />
 
@@ -130,10 +202,9 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <span style={{
           fontSize: 11, fontWeight: 600, color: "var(--text)",
-          textTransform: "uppercase", letterSpacing: "0.07em",
-          marginBottom: 2,
+          textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 2,
         }}>
-          Tracks
+          {isSingle ? "Track" : "Tracks"}
         </span>
 
         {rows.map((r, i) => {
@@ -141,34 +212,37 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           return (
             <div
               key={r.track.temp_path}
-              draggable
-              onDragStart={() => onDragStart(i)}
-              onDragEnter={() => onDragEnter(i)}
+              draggable={!isSingle}
+              onDragStart={() => !isSingle && onDragStart(i)}
+              onDragEnter={() => !isSingle && onDragEnter(i)}
               onDragOver={(e) => e.preventDefault()}
               onDragEnd={onDragEnd}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "6px 8px",
-                borderRadius: 7,
-                border: isOver
-                  ? "1px solid var(--accent-border)"
-                  : "1px solid transparent",
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "6px 8px", borderRadius: 7,
+                border: isOver ? "1px solid var(--accent-border)" : "1px solid transparent",
                 background: isOver ? "var(--accent-bg)" : "transparent",
                 transition: "background 0.1s, border-color 0.1s",
                 userSelect: "none",
               }}
             >
-              <DragHandle />
+              {!isSingle && <DragHandle />}
 
-              <span style={{
-                fontSize: 12, color: "var(--text)", opacity: 0.45,
-                minWidth: 20, textAlign: "right",
-                fontVariantNumeric: "tabular-nums",
-              }}>
-                {String(i + 1).padStart(2, "0")}
-              </span>
+              {!isSingle && (
+                <input
+                  type="number"
+                  min={1}
+                  value={r.track_number}
+                  draggable={false}
+                  onDragStart={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v > 0)
+                      setRows((rs) => rs.map((row, j) => j === i ? { ...row, track_number: v } : row));
+                  }}
+                  style={{ width: 64, textAlign: "center", flexShrink: 0 }}
+                />
+              )}
 
               <input
                 value={r.title}
@@ -179,16 +253,14 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
                   setRows((rs) => rs.map((row, j) => j === i ? { ...row, title: v } : row));
                 }}
                 onDragStart={(e) => e.stopPropagation()}
-                style={{
-                  flex: 1,
-                  borderColor: !r.title.trim() ? "var(--danger)" : undefined,
-                }}
+                style={{ flex: 1, borderColor: !r.title.trim() ? "var(--danger)" : undefined }}
               />
 
               <span style={{
                 fontSize: 11, color: "var(--text)", opacity: 0.35,
                 whiteSpace: "nowrap", maxWidth: 130,
                 overflow: "hidden", textOverflow: "ellipsis",
+                display: "var(--filename-display, inline)",
               }}>
                 {r.track.file_name}
               </span>

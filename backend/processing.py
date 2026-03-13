@@ -1,10 +1,12 @@
 import base64
+import logging
 import os
 import re
-import shutil
 from typing import Optional
 
 from models import TrackMeta, ProcessRequest
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = "/music"
 
@@ -138,29 +140,97 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
 # Embed tags and save to OUTPUT_DIR
 # ---------------------------------------------------------------------------
 
+def _source_bitrate(path: str) -> int:
+    """Return audio bitrate in kbps using ffprobe, or 0 on failure."""
+    import subprocess, json
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams", "-select_streams", "a:0",
+                path,
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        streams = json.loads(result.stdout).get("streams", [])
+        if streams:
+            return int(streams[0].get("bit_rate", 0)) // 1000
+    except Exception:
+        pass
+    return 0
+
+
+def _to_mp3(src: str, dest: str, meta: dict, cover_bytes: Optional[bytes]) -> None:
+    """
+    Convert *src* to MP3 at ≤256 kbps and embed metadata via ffmpeg.
+    If the source is already MP3 at ≤256 kbps the audio stream is copied
+    without re-encoding to avoid generation loss.
+    """
+    import subprocess, tempfile
+
+    src_kbps  = _source_bitrate(src)
+    is_mp3    = src.lower().endswith(".mp3")
+    target_br = min(src_kbps, 256) if src_kbps > 0 else 256
+
+    # Stream-copy only when already MP3 and within limit
+    if is_mp3 and src_kbps <= 256:
+        audio_opts = ["-c:a", "copy"]
+    else:
+        audio_opts = ["-c:a", "libmp3lame", "-b:a", f"{target_br}k", "-q:a", "0"]
+
+    cmd = ["ffmpeg", "-y", "-i", src]
+
+    # Attach cover art as a second input if available
+    if cover_bytes:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(cover_bytes)
+            cover_path = tmp.name
+        cmd += ["-i", cover_path]
+        map_opts   = ["-map", "0:a", "-map", "1:v"]
+        cover_opts = ["-c:v", "mjpeg", "-disposition:v", "attached_pic"]
+    else:
+        cover_path = None
+        map_opts   = ["-map", "0:a"]
+        cover_opts = []
+
+    cmd += map_opts + audio_opts + cover_opts + [
+        "-id3v2_version", "3",
+        "-metadata", f"title={meta['title']}",
+        "-metadata", f"artist={meta['artist']}",
+        "-metadata", f"album_artist={meta['album_artist']}",
+        "-metadata", f"album={meta['album']}",
+        "-metadata", f"date={meta['release_year']}",
+        *([] if meta['track_number'] is None else ["-metadata", f"track={meta['track_number']}"]),
+        dest,
+    ]
+
+    logger.info(
+        "ffmpeg: %s → %s (%s, %d kbps → %d kbps)",
+        os.path.basename(src), os.path.basename(dest),
+        "copy" if is_mp3 and src_kbps <= 256 else "encode",
+        src_kbps, target_br,
+    )
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+    if cover_path:
+        os.unlink(cover_path)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed:\n{result.stderr[-1000:]}")
+
+
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Embed metadata into every track and move to OUTPUT_DIR.
-    Preserves original format — re-tags in place, then moves.
+    Convert every track to MP3 (≤256 kbps), embed metadata, save to OUTPUT_DIR.
+    Single track uploads get album = "<title> (Single)" and no track number prefix.
     """
-    from mutagen import File as MutagenFile
-    from mutagen.id3 import (
-        ID3, ID3NoHeaderError,
-        TPE1, TPE2, TALB, TIT2, TDRC, TRCK, APIC,
-    )
-    from mutagen.flac import Picture
-    import struct
+    is_single = req.is_single
 
     cover_bytes: Optional[bytes] = None
     if req.cover_art_b64:
         cover_bytes = base64.b64decode(req.cover_art_b64)
-
-    out_dir = os.path.join(
-        OUTPUT_DIR,
-        _safe(req.album_artist),
-        _safe(req.album),
-    )
-    os.makedirs(out_dir, exist_ok=True)
 
     saved = []
     for t in req.tracks:
@@ -168,52 +238,29 @@ def process_album(req: ProcessRequest) -> list[str]:
         if art is None and t.cover_art_b64:
             art = base64.b64decode(t.cover_art_b64)
 
-        audio = MutagenFile(t.temp_path, easy=False)
-        is_id3 = audio is not None and hasattr(audio.tags, "getall")
+        album = req.album
 
-        if is_id3:
-            try:
-                tags = ID3(t.temp_path)
-            except ID3NoHeaderError:
-                tags = ID3()
-            tags.clear()
-            tags.add(TIT2(encoding=3, text=t.title))
-            tags.add(TPE1(encoding=3, text=req.artist))
-            tags.add(TPE2(encoding=3, text=req.album_artist))
-            tags.add(TALB(encoding=3, text=req.album))
-            tags.add(TDRC(encoding=3, text=req.release_year))
-            tags.add(TRCK(encoding=3, text=str(t.track_number)))
-            if art:
-                mime = "image/png" if art[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
-                tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=art))
-            tags.save(t.temp_path, v2_version=3)
+        meta = {
+            "title":        t.title,
+            "artist":       req.artist,
+            "album_artist": req.album_artist,
+            "album":        album,
+            "release_year": req.release_year,
+            "track_number": None if is_single else t.track_number,
+        }
 
-        else:
-            # Vorbis comment (FLAC, OGG…)
-            if audio.tags is None:
-                audio.add_tags()
-            audio.tags["title"]       = [t.title]
-            audio.tags["artist"]      = [req.artist]
-            audio.tags["albumartist"] = [req.album_artist]
-            audio.tags["album"]       = [req.album]
-            audio.tags["date"]        = [req.release_year]
-            audio.tags["tracknumber"] = [str(t.track_number)]
+        out_dir = os.path.join(
+            OUTPUT_DIR,
+            _safe(req.album_artist),
+            _safe(album),
+        )
+        os.makedirs(out_dir, exist_ok=True)
 
-            if art and hasattr(audio, "clear_pictures"):
-                from mutagen.flac import Picture
-                pic = Picture()
-                pic.type = 3
-                pic.mime = "image/png" if art[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
-                pic.data = art
-                audio.clear_pictures()
-                audio.add_picture(pic)
-
-            audio.save()
-
-        ext  = os.path.splitext(t.file_name)[1] or ".mp3"
-        fname = _safe(f"{t.track_number:02d} {t.title}") + ext
+        fname = _safe(t.title) + ".mp3"  if is_single else _safe(f"{t.track_number:02d} {t.title}") + ".mp3"
         dest  = os.path.join(out_dir, fname)
-        shutil.move(t.temp_path, dest)
+
+        _to_mp3(t.temp_path, dest, meta, art)
+        os.unlink(t.temp_path)
         saved.append(dest)
 
     return saved

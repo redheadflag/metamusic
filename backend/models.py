@@ -9,7 +9,7 @@ class TrackMeta(BaseModel):
     album_artist: str
     album: str
     release_year: str
-    track_number: int
+    track_number: int | None = None
     cover_art_b64: str | None = None  # base64 for preview, None if absent
 
 
@@ -20,4 +20,5 @@ class ProcessRequest(BaseModel):
     album_artist: str
     album: str
     release_year: str
+    is_single: bool = False
     cover_art_b64: str | None = None  # base64; None = keep per-track art or skip

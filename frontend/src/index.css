@@ -84,3 +84,7 @@ button.primary {
 }
 button.primary:hover { opacity: 0.88; background: var(--accent); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 480px) {
+  :root { --filename-display: none; }
+}

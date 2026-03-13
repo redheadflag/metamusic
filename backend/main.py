@@ -66,8 +66,19 @@ async def process(req: ProcessRequest):
     """Embed confirmed metadata and save files to the music library."""
     if not req.tracks:
         raise HTTPException(400, "No tracks provided")
-    if not req.album_artist or not req.album:
-        raise HTTPException(400, "album_artist and album are required")
+
+    is_single = req.is_single
+
+    # Auto-fill album_artist from artist if missing
+    if not req.album_artist:
+        req = req.model_copy(update={"album_artist": req.artist})
+
+    # Singles: derive album name from track title
+    if is_single and not req.album:
+        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
+
+    if not req.album:
+        raise HTTPException(400, "album is required for multi-track uploads")
 
     logger.info(
         "Processing %d track(s): artist=%r album=%r year=%r",
