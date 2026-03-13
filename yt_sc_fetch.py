@@ -125,7 +125,9 @@ def parse_metadata(raw: dict, track_number: int | None = None) -> dict:
 
         artist = album_artist
 
-    album = raw.get("album") or raw.get("playlist_title") or "Unknown Album"
+    album = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
+    # artist always matches album_artist
+    artist = album_artist
     release_year = (
         raw.get("release_year")
         or str(raw.get("release_date", ""))[:4]
@@ -409,8 +411,9 @@ def parse_sc_metadata(raw: dict, track_number: int | None = None) -> dict:
     """
     artist       = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
     album_artist = artist.split(",")[0].strip()
+    artist       = album_artist  # artist always matches album_artist
     track        = raw.get("title") or "Unknown Track"
-    album        = raw.get("album") or raw.get("playlist_title") or "Unknown Album"
+    album        = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
     release_year = (
         str(raw.get("release_date", ""))[:4]
         or str(raw.get("upload_date",  ""))[:4]
@@ -447,9 +450,46 @@ def display_metadata(meta: dict) -> None:
     print("└────────────────────────────────────────\n")
 
 
-def process_sc_entry(raw: dict, output_dir: str, track_number: int | None = None) -> None:
+
+def apply_sc_overrides(meta: dict, overrides: dict) -> dict:
+    """Merge user-supplied override values into a parsed meta dict."""
+    meta = dict(meta)
+    if overrides.get("artist"):
+        meta["artist"]       = overrides["artist"]
+        meta["album_artist"] = overrides["artist"].split(",")[0].strip()
+    if overrides.get("album_artist"):
+        meta["album_artist"] = overrides["album_artist"]
+    if overrides.get("album"):
+        meta["album"]        = overrides["album"]
+    if overrides.get("track"):
+        meta["track"]        = overrides["track"]
+    if overrides.get("year"):
+        meta["release_year"] = overrides["year"]
+    return meta
+
+
+def validate_sc_overrides(overrides: dict, is_playlist: bool) -> None:
+    """
+    When any override is supplied, enforce that all required fields are present.
+    Required always:            --artist, --album, --year
+    Required for single track:  --track
+    """
+    missing = [f"--{k}" for k in ("artist", "album", "year") if not overrides.get(k)]
+    if not is_playlist and not overrides.get("track"):
+        missing.append("--track")
+    if missing:
+        die(
+            "When passing metadata overrides the following arguments are also required: "
+            + ", ".join(missing)
+        )
+
+
+def process_sc_entry(raw: dict, output_dir: str, track_number: int | None = None,
+                     overrides: dict | None = None) -> None:
     """Parse SC metadata from one raw entry, display it, download and tag."""
     meta      = parse_sc_metadata(raw, track_number=track_number)
+    if overrides:
+        meta  = apply_sc_overrides(meta, overrides)
     cover_art = fetch_cover_art(raw)
 
     display_metadata(meta)
@@ -476,47 +516,106 @@ def process_sc_entry(raw: dict, output_dir: str, track_number: int | None = None
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # -- SoundCloud direct mode --
-    if len(sys.argv) == 3 and sys.argv[1] == "--sc":
-        sc_url     = sys.argv[2]
-        output_dir = "output"
-        os.makedirs(output_dir, exist_ok=True)
+    import argparse
 
-        entries     = fetch_sc_entries(sc_url)
-        is_playlist = len(entries) > 1
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(sys.argv[0]),
+        description=(
+            "Download audio from YouTube (auto-search SC) or SoundCloud directly.\n\n"
+            "Examples:\n"
+            "  %(prog)s <yt_url> [<yt_url> ...]\n"
+            "  %(prog)s --sc <sc_url> [<sc_url> ...]\n"
+            "  %(prog)s --sc <sc_url> --artist 'Drake' --album 'Scorpion' --year 2018\n"
+            "  %(prog)s --sc <sc_url> --artist 'Drake' --album 'Scorpion' --year 2018 --track 'God Plan'"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("urls", nargs="*",
+                        help="One or more YouTube or SoundCloud URLs.")
+    parser.add_argument("--sc", action="store_true",
+                        help="SoundCloud direct mode.")
 
-        for i, raw in enumerate(entries, 1):
-            if is_playlist:
-                log(f"\n[{i}/{len(entries)}]")
-            track_number = i if is_playlist else None
-            process_sc_entry(raw, output_dir, track_number=track_number)
+    og = parser.add_argument_group(
+        "metadata overrides (--sc mode only)",
+        "Override metadata fetched from SoundCloud.\n"
+        "When any override is given, --artist, --album, and --year are required.\n"
+        "--track is also required for single tracks.",
+    )
+    og.add_argument("--artist",       metavar="ARTIST",
+                    help="Artist name (comma-separated for multiple)")
+    og.add_argument("--album-artist", metavar="ALBUM_ARTIST", dest="album_artist",
+                    help="Album artist (defaults to first value in --artist)")
+    og.add_argument("--album",        metavar="ALBUM",  help="Album name")
+    og.add_argument("--track",        metavar="TRACK",  help="Track title (single tracks only)")
+    og.add_argument("--year",         metavar="YEAR",   help="Release year")
 
-        log(f"\nFinished. {len(entries)} track(s) downloaded.")
-        return
+    args = parser.parse_args()
 
-    # -- YouTube mode --
-    if len(sys.argv) != 2:
-        print(f"Usage:")
-        print(f"  {sys.argv[0]} <youtube_url_or_playlist>")
-        print(f"  {sys.argv[0]} --sc <soundcloud_url_or_playlist>")
+    if not args.urls:
+        parser.print_help()
         sys.exit(1)
-
-    yt_url  = sys.argv[1]
-    entries = fetch_playlist_entries(yt_url)
 
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
-    skipped_tracks: list[str] = []
-    is_playlist = len(entries) > 1
-    for i, raw in enumerate(entries, 1):
-        log(f"\n[{i}/{len(entries)}]")
-        track_number = i if is_playlist else None
-        skipped = process_entry(raw, output_dir=output_dir, track_number=track_number)
-        if skipped:
-            skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
+    overrides = {
+        "artist":       args.artist,
+        "album_artist": args.album_artist,
+        "album":        args.album,
+        "track":        args.track,
+        "year":         args.year,
+    }
+    has_overrides = any(v is not None for v in overrides.values())
 
-    ok = len(entries) - len(skipped_tracks)
+    # -- SoundCloud direct mode --
+    if args.sc:
+        total_downloaded = 0
+        for url_idx, sc_url in enumerate(args.urls, 1):
+            if len(args.urls) > 1:
+                log(f"\n══ SC source [{url_idx}/{len(args.urls)}]: {sc_url}")
+
+            entries     = fetch_sc_entries(sc_url)
+            is_playlist = len(entries) > 1
+
+            if has_overrides:
+                validate_sc_overrides(overrides, is_playlist)
+
+            for i, raw in enumerate(entries, 1):
+                if is_playlist:
+                    log(f"\n[{i}/{len(entries)}]")
+                track_number = i if is_playlist else None
+                process_sc_entry(
+                    raw, output_dir,
+                    track_number=track_number,
+                    overrides=overrides if has_overrides else None,
+                )
+                total_downloaded += 1
+
+        log(f"\nFinished. {total_downloaded} track(s) downloaded.")
+        return
+
+    # Metadata overrides only apply to --sc mode
+    if has_overrides:
+        die("Metadata override flags (--artist, --album, etc.) are only supported with --sc.")
+
+    # -- YouTube mode --
+    skipped_tracks: list[str] = []
+    total_entries  = 0
+
+    for url_idx, yt_url in enumerate(args.urls, 1):
+        if len(args.urls) > 1:
+            log(f"\n══ YouTube source [{url_idx}/{len(args.urls)}]: {yt_url}")
+        entries = fetch_playlist_entries(yt_url)
+        total_entries += len(entries)
+        is_playlist = len(entries) > 1
+        for i, raw in enumerate(entries, 1):
+            log(f"\n[{i}/{len(entries)}]")
+            track_number = i if is_playlist else None
+            skipped = process_entry(raw, output_dir=output_dir, track_number=track_number)
+            if skipped:
+                skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
+
+    ok = total_entries - len(skipped_tracks)
     log(f"\nFinished. {ok} downloaded, {len(skipped_tracks)} skipped.")
     if skipped_tracks:
         print("\nSkipped tracks:")
