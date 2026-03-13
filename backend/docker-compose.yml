@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    env_file: ../.env
+    volumes:
+      - ../${OUTPUT_DIR}:/music
+    ports:
+      - "8000:8000"
+    develop:
+      watch:
+        - action: sync+restart
+          path: .
+          target: /app

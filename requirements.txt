@@ -1,5 +1,0 @@
-aiogram>=3.0
-python-dotenv
-yt-dlp
-mutagen
-requests
