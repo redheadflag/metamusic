@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import ProcessRequest, AlbumMeta, BulkProcessRequest
+from models import ProcessRequest, AlbumMeta, BulkProcessRequest, TrackMeta
 from processing import read_tags, process_album
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -168,3 +168,157 @@ async def process_bulk(req: BulkProcessRequest):
         all_saved.extend(saved)
 
     return {"saved": all_saved}
+
+
+# ---------------------------------------------------------------------------
+# SoundCloud endpoints
+# ---------------------------------------------------------------------------
+
+from models import ScProcessRequest
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+
+_executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _run_blocking(fn, *args):
+    """Run a blocking function in a thread pool."""
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(_executor, fn, *args)
+
+
+@app.post("/api/sc-fetch")
+async def sc_fetch(body: dict):
+    """
+    Fetch metadata from a SoundCloud URL (track or playlist/album).
+    Returns TrackMeta list pre-filled from yt-dlp info dicts.
+    """
+    from yt_sc_fetch.sc import fetch_sc_entries
+    from yt_sc_fetch.metadata import parse_sc_metadata
+    from yt_sc_fetch.audio import fetch_cover_art
+    import base64
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url is required")
+
+    logger.info("SC fetch: %s", url)
+
+    try:
+        entries = await _run_blocking(fetch_sc_entries, url)
+    except SystemExit as e:
+        raise HTTPException(400, f"yt-dlp error: {e}")
+
+    results = []
+    for i, raw in enumerate(entries, 1):
+        meta  = parse_sc_metadata(raw, track_number=i if len(entries) > 1 else None)
+        cover_bytes = await _run_blocking(fetch_cover_art, raw)
+        cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+
+        sc_url = raw.get("webpage_url") or raw.get("url") or ""
+        results.append(TrackMeta(
+            temp_path="",
+            file_name=f"{meta['track']}.mp3",
+            title=meta["track"],
+            artist=meta["artist"],
+            album_artist=meta["album_artist"],
+            album=meta["album"],
+            release_year=meta["release_year"],
+            track_number=meta["track_number"],
+            cover_art_b64=cover_b64,
+            sc_url=sc_url,
+        ))
+        logger.info("SC entry %d: title=%r artist=%r album=%r url=%s",
+                    i, meta["track"], meta["artist"], meta["album"], sc_url)
+
+    return results
+
+
+@app.post("/api/sc-process")
+async def sc_process(req: ScProcessRequest):
+    """
+    Download SoundCloud tracks, convert to MP3, embed confirmed metadata.
+    """
+    import base64, tempfile as tf
+    from yt_sc_fetch.audio import fetch_cover_art
+    from processing import _to_mp3, _safe, MUSIC_LIBRARY_PATH
+
+    if not req.tracks:
+        raise HTTPException(400, "No tracks provided")
+
+    is_single = req.is_single
+
+    if not req.album_artist:
+        req = req.model_copy(update={"album_artist": req.artist})
+
+    if is_single and not req.album:
+        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
+
+    if not req.album:
+        raise HTTPException(400, "album is required")
+
+    cover_bytes: bytes | None = None
+    if req.cover_art_b64:
+        cover_bytes = base64.b64decode(req.cover_art_b64)
+
+    saved = []
+    for t in req.tracks:
+        if not t.sc_url:
+            raise HTTPException(400, f"Missing sc_url for track '{t.title}'")
+
+        art = cover_bytes or (base64.b64decode(t.cover_art_b64) if t.cover_art_b64 else None)
+
+        track_num = t.track_number
+        album     = req.album
+
+        meta = {
+            "title":        t.title,
+            "artist":       req.artist,
+            "album_artist": req.album_artist,
+            "album":        album,
+            "release_year": req.release_year,
+            "track_number": None if is_single else track_num,
+        }
+
+        out_dir = os.path.join(MUSIC_LIBRARY_PATH, _safe(req.album_artist), _safe(album))
+        os.makedirs(out_dir, exist_ok=True)
+
+        fname = (
+            _safe(t.title) + ".mp3" if is_single
+            else _safe(f"{track_num:02d} {t.title}") + ".mp3"
+        )
+        dest = os.path.join(out_dir, fname)
+
+        logger.info("Downloading SC track: %r → %s", t.sc_url, dest)
+
+        def _download_and_convert(sc_url, tmp_dir, dest, meta, art):
+            from yt_sc_fetch.utils import run as yt_run
+            output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
+            result = yt_run([
+                "yt-dlp", "--no-playlist",
+                "--format", "bestaudio/best",
+                "--extract-audio", "--audio-format", "mp3",
+                "--audio-quality", "0",
+                "--no-embed-metadata", "--no-embed-thumbnail",
+                "--output", output_tmpl,
+                sc_url,
+            ])
+            if result.returncode != 0:
+                raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
+            mp3 = next((os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".mp3")), None)
+            if not mp3:
+                raise RuntimeError("yt-dlp produced no mp3 file")
+            _to_mp3(mp3, dest, meta, art)
+            os.unlink(mp3)
+
+        tmp_dir = tf.mkdtemp(prefix="sc_dl_")
+        try:
+            await _run_blocking(_download_and_convert, t.sc_url, tmp_dir, dest, meta, art)
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        saved.append(dest)
+
+    logger.info("SC saved: %s", saved)
+    return {"saved": saved}

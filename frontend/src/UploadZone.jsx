@@ -1,46 +1,52 @@
 import { useRef, useState } from "react";
 
-export default function UploadZone({ onFiles }) {
+export default function UploadZone({ onFiles, onBack }) {
   const inputRef = useRef();
   const [dragging, setDragging] = useState(false);
 
   function handle(files) {
-    const all = Array.from(files);
-    const zips   = all.filter((f) => /\.zip$/i.test(f.name));
-    const audio  = all.filter((f) => f.type.startsWith("audio/") || /\.(mp3|flac|ogg|m4a|wav|aiff)$/i.test(f.name));
-    if (zips.length)  onFiles(zips,  "zip");
-    else if (audio.length) onFiles(audio, "audio");
+    const all   = Array.from(files);
+    const zips  = all.filter((f) => /\.zip$/i.test(f.name));
+    const audio = all.filter((f) => f.type.startsWith("audio/") || /\.(mp3|flac|ogg|m4a|wav|aiff)$/i.test(f.name));
+    if (zips.length)        onFiles(zips,  "zip");
+    else if (audio.length)  onFiles(audio, "audio");
   }
 
   return (
-    <div
-      onClick={() => inputRef.current.click()}
-      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(e) => { e.preventDefault(); setDragging(false); handle(e.dataTransfer.files); }}
-      style={{
-        border: `1.5px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
-        borderRadius: "var(--radius)",
-        padding: "56px 24px",
-        textAlign: "center",
-        cursor: "pointer",
-        background: dragging ? "var(--accent-bg)" : "transparent",
-        transition: "background 0.15s, border-color 0.15s",
-      }}
-    >
-      <p style={{ fontSize: 14, color: "var(--text)", opacity: 0.7, marginBottom: 6 }}>
-        Drop audio files here
-      </p>
-      <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.5, marginTop: 8 }}>audio files or .zip albums</p>
-      <p style={{ fontSize: 13, color: "var(--accent)" }}>click to browse</p>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept="audio/*,.flac,.aiff,.zip"
-        style={{ display: "none" }}
-        onChange={(e) => handle(e.target.files)}
-      />
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div
+        onClick={() => inputRef.current.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); handle(e.dataTransfer.files); }}
+        style={{
+          border: `1.5px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
+          borderRadius: "var(--radius)",
+          padding: "56px 24px",
+          textAlign: "center",
+          cursor: "pointer",
+          background: dragging ? "var(--accent-bg)" : "transparent",
+          transition: "background 0.15s, border-color 0.15s",
+        }}
+      >
+        <p style={{ fontSize: 14, color: "var(--text)", opacity: 0.7, marginBottom: 6 }}>
+          Drop audio files here
+        </p>
+        <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.5, marginTop: 8 }}>
+          audio files or .zip albums
+        </p>
+        <p style={{ fontSize: 13, color: "var(--accent)" }}>click to browse</p>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept="audio/*,.flac,.aiff,.zip"
+          style={{ display: "none" }}
+          onChange={(e) => handle(e.target.files)}
+        />
+      </div>
+
+      {onBack && <button onClick={onBack}>← Back</button>}
     </div>
   );
 }

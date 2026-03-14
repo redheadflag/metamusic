@@ -1,7 +1,9 @@
 import { useState } from "react";
-import UploadZone from "./UploadZone.jsx";
-import MetaEditor from "./MetaEditor.jsx";
-import BulkEditor from "./BulkEditor.jsx";
+import ModeSelector from "./ModeSelector.jsx";
+import UploadZone   from "./UploadZone.jsx";
+import ScInput      from "./ScInput.jsx";
+import MetaEditor   from "./MetaEditor.jsx";
+import BulkEditor   from "./BulkEditor.jsx";
 
 const API = "/api";
 
@@ -39,9 +41,11 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-// state: "idle" | "uploading" | "editing" | "bulk-editing" | "saving" | "done" | "error"
+// mode:  null | "files" | "soundcloud"
+// state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing" | "bulk-editing" | "saving" | "done" | "error"
 
 export default function App() {
+  const [mode,     setMode]     = useState(null);
   const [state,    setState]    = useState("idle");
   const [progress, setProgress] = useState(0);
   const [tracks,   setTracks]   = useState([]);
@@ -49,6 +53,7 @@ export default function App() {
   const [saved,    setSaved]    = useState([]);
   const [error,    setError]    = useState(null);
 
+  // ── file upload ──────────────────────────────────────────────────────────
   async function handleFiles(files, type) {
     setState("uploading");
     setProgress(0);
@@ -72,14 +77,38 @@ export default function App() {
     }
   }
 
+  // ── SoundCloud fetch ─────────────────────────────────────────────────────
+  async function handleScFetch(url) {
+    setState("sc-fetching");
+    setError(null);
+    try {
+      const res = await fetch(`${API}/sc-fetch`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ url }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setTracks(data);
+      setState("editing");
+    } catch (e) {
+      setState("sc-input");   // stay on SC input so user can correct URL
+      throw e;                // bubble to ScInput for inline error display
+    }
+  }
+
+  // ── process (file-uploaded tracks) ──────────────────────────────────────
   async function handleConfirm(meta) {
     setState("saving");
     setError(null);
     try {
-      const res = await fetch(`${API}/process`, {
-        method: "POST",
+      // SC tracks have no temp_path — use sc-process endpoint
+      const hasSc = meta.tracks?.some((t) => t.sc_url);
+      const endpoint = hasSc ? `${API}/sc-process` : `${API}/process`;
+      const res = await fetch(endpoint, {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(meta),
+        body:    JSON.stringify(meta),
       });
       if (!res.ok) throw new Error(await res.text());
       setSaved((await res.json()).saved);
@@ -90,14 +119,15 @@ export default function App() {
     }
   }
 
+  // ── process (bulk zip albums) ────────────────────────────────────────────
   async function handleBulkConfirm(albumRequests) {
     setState("saving");
     setError(null);
     try {
       const res = await fetch(`${API}/process-bulk`, {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ albums: albumRequests }),
+        body:    JSON.stringify({ albums: albumRequests }),
       });
       if (!res.ok) throw new Error(await res.text());
       setSaved((await res.json()).saved);
@@ -109,12 +139,23 @@ export default function App() {
   }
 
   function reset() {
-    setTracks([]); setAlbums([]); setSaved([]); setProgress(0); setState("idle");
+    setMode(null);
+    setTracks([]); setAlbums([]); setSaved([]); setProgress(0);
+    setState("idle");
+    setError(null);
   }
 
-  const editingCount = state === "editing" ? tracks.length
+  function backToMode() {
+    setTracks([]); setAlbums([]); setProgress(0); setError(null);
+    setState("idle");
+    // keep mode so user lands back on the right input
+  }
+
+  const editingCount = state === "editing"      ? tracks.length
                      : state === "bulk-editing" ? albums.length
                      : 0;
+
+  const showCount = state === "editing" || state === "bulk-editing";
 
   return (
     <>
@@ -123,24 +164,58 @@ export default function App() {
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        <h1>Upload to music.redheadflag.com</h1>
-        {(state === "editing" || state === "bulk-editing") && (
+        <h1 style={{ cursor: mode ? "pointer" : "default" }} onClick={reset}>
+          Upload to music.redheadflag.com
+        </h1>
+        {showCount && (
           <span style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>
             {editingCount} {state === "bulk-editing" ? "album" : "track"}{editingCount !== 1 ? "s" : ""}
           </span>
         )}
       </header>
 
-      {state === "idle" && <UploadZone onFiles={handleFiles} />}
-
-      {state === "uploading" && <ProgressBar progress={progress} label="Uploading…" />}
-
-      {state === "editing" && (
-        <MetaEditor tracks={tracks} onConfirm={handleConfirm} onReset={reset} />
+      {/* Mode selection */}
+      {state === "idle" && !mode && (
+        <ModeSelector onSelect={(m) => {
+          setMode(m);
+          if (m === "soundcloud") setState("sc-input");
+        }} />
       )}
 
+      {/* Files mode */}
+      {state === "idle" && mode === "files" && (
+        <UploadZone onFiles={handleFiles} onBack={() => { setMode(null); }} />
+      )}
+
+      {/* SoundCloud mode */}
+      {state === "sc-input" && (
+        <ScInput
+          onFetch={handleScFetch}
+          onBack={() => { setMode(null); setState("idle"); }}
+        />
+      )}
+
+      {state === "sc-fetching" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <p style={{ color: "var(--text)", opacity: 0.5 }}>Fetching metadata from SoundCloud…</p>
+          <div><button onClick={() => { setState("sc-input"); }}>← Back</button></div>
+        </div>
+      )}
+
+      {/* Upload progress */}
+      {state === "uploading" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ProgressBar progress={progress} label="Uploading…" />
+          <div><button onClick={() => { setState("idle"); setMode(mode); setProgress(0); }}>← Back</button></div>
+        </div>
+      )}
+
+      {/* Editors */}
+      {state === "editing" && (
+        <MetaEditor tracks={tracks} onConfirm={handleConfirm} onReset={backToMode} />
+      )}
       {state === "bulk-editing" && (
-        <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={reset} />
+        <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={backToMode} />
       )}
 
       {state === "saving" && (
