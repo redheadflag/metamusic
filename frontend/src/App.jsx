@@ -105,7 +105,7 @@ export default function App() {
         alignItems: "center",
         justifyContent: "space-between",
       }}>
-        <h1>metamusic</h1>
+        <h1>Upload to music.redheadflag.com</h1>
         {state === "editing" && (
           <span style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>
             {tracks.length} track{tracks.length !== 1 ? "s" : ""}
