@@ -18,3 +18,16 @@ services:
         - action: sync+restart
           path: ./backend
           target: /app
+
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    command: python bot/main.py
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend
+          target: /app

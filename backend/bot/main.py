@@ -3,8 +3,6 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.client.telegram import TelegramAPIServer
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
@@ -21,18 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    bot_api_url = os.environ.get("BOT_API_URL")
-
-    if bot_api_url:
-        logger.info("Using local Bot API server: %s", bot_api_url)
-        session = AiohttpSession(api=TelegramAPIServer.from_base(bot_api_url))
-    else:
-        logger.warning(
-            "BOT_API_URL is not set — using official Telegram API (20 MB file limit)"
-        )
-        session = None
-
-    bot = Bot(token=os.environ["BOT_TOKEN"], session=session)
+    bot = Bot(token=os.environ["BOT_TOKEN"])
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(menu_router)

@@ -1,7 +1,9 @@
+import logging
+import os
 import random
 import re
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
@@ -10,6 +12,7 @@ from keyboards import main_menu
 from services.navidrome import create_navidrome_user
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9\-_.]{3,32}$")
 
@@ -49,3 +52,29 @@ async def handle_username(message: Message, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=main_menu,
     )
+
+    await _notify_admin(message.bot, message)
+
+
+async def _notify_admin(bot: Bot, message: Message) -> None:
+    admin_id = os.environ.get("ADMIN_USER_TELEGRAM_ID")
+    if not admin_id:
+        logger.warning("ADMIN_USER_TELEGRAM_ID is not set — skipping admin notification")
+        return
+
+    user = message.from_user
+    user_id = user.id if user else "unknown"
+    username_tg = f"@{user.username}" if user and user.username else "no username"
+
+    try:
+        await bot.send_message(
+            chat_id=int(admin_id),
+            text=(
+                f"👤 New account registered\n\n"
+                f"<b>Telegram ID:</b> <code>{user_id}</code>\n"
+                f"<b>Telegram username:</b> {username_tg}"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.error("Failed to notify admin (chat_id=%s): %s", admin_id, exc)
