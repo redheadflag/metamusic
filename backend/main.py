@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import logging
@@ -5,7 +6,7 @@ import logging
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import ProcessRequest
+from models import ProcessRequest, AlbumMeta, BulkProcessRequest
 from processing import read_tags, process_album
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -87,3 +88,83 @@ async def process(req: ProcessRequest):
     saved = process_album(req)
     logger.info("Saved: %s", saved)
     return {"saved": saved}
+
+@app.post("/api/upload-zip")
+async def upload_zip(files: list[UploadFile]):
+    """
+    Receive one or more zip archives, extract audio files from each,
+    read their tags, and return a list of AlbumMeta (one per zip).
+    """
+    import zipfile
+
+    if not files:
+        raise HTTPException(400, "No files provided")
+
+    albums: list[AlbumMeta] = []
+
+    for zf in files:
+        if not (zf.filename or "").lower().endswith(".zip"):
+            raise HTTPException(400, f"'{zf.filename}' is not a zip file")
+
+        content = await zf.read()
+        album_dir = tempfile.mkdtemp(prefix="metamusic_zip_", dir=UPLOAD_DIR)
+
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            audio_exts = {".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aiff", ".aif"}
+            members = sorted(
+                (m for m in z.namelist()
+                 if not m.startswith("__MACOSX") and
+                    os.path.splitext(m.lower())[1] in audio_exts),
+                key=lambda n: n
+            )
+            if not members:
+                raise HTTPException(400, f"No audio files found in '{zf.filename}'")
+
+            extracted = []
+            for i, member in enumerate(members, 1):
+                fname = os.path.basename(member)
+                dest  = os.path.join(album_dir, f"{i:02d}_{fname}")
+                with z.open(member) as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+                extracted.append((i, fname, dest))
+
+        tracks = []
+        for i, fname, path in extracted:
+            meta = read_tags(path, fname, i)
+            logger.info("zip %r track %d: title=%r artist=%r album=%r",
+                        zf.filename, i, meta.title, meta.artist, meta.album)
+            tracks.append(meta)
+
+        first = tracks[0]
+        albums.append(AlbumMeta(
+            zip_name=zf.filename or "archive.zip",
+            tracks=tracks,
+            artist=first.artist,
+            album_artist=first.album_artist or first.artist,
+            album=first.album,
+            release_year=first.release_year,
+            cover_art_b64=first.cover_art_b64,
+        ))
+
+    return albums
+
+
+@app.post("/api/process-bulk")
+async def process_bulk(req: BulkProcessRequest):
+    """Process multiple albums at once (e.g. from zip uploads)."""
+    if not req.albums:
+        raise HTTPException(400, "No albums provided")
+
+    all_saved = []
+    for album_req in req.albums:
+        if not album_req.album_artist:
+            album_req = album_req.model_copy(update={"album_artist": album_req.artist})
+        if not album_req.album:
+            raise HTTPException(400, "album is required for each entry")
+
+        logger.info("Bulk processing: artist=%r album=%r tracks=%d",
+                    album_req.artist, album_req.album, len(album_req.tracks))
+        saved = process_album(album_req)
+        all_saved.extend(saved)
+
+    return {"saved": all_saved}

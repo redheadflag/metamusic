@@ -5,10 +5,11 @@ export default function UploadZone({ onFiles }) {
   const [dragging, setDragging] = useState(false);
 
   function handle(files) {
-    const audio = Array.from(files).filter(
-      (f) => f.type.startsWith("audio/") || /\.(mp3|flac|ogg|m4a|wav|aiff)$/i.test(f.name)
-    );
-    if (audio.length) onFiles(audio);
+    const all = Array.from(files);
+    const zips   = all.filter((f) => /\.zip$/i.test(f.name));
+    const audio  = all.filter((f) => f.type.startsWith("audio/") || /\.(mp3|flac|ogg|m4a|wav|aiff)$/i.test(f.name));
+    if (zips.length)  onFiles(zips,  "zip");
+    else if (audio.length) onFiles(audio, "audio");
   }
 
   return (
@@ -30,12 +31,13 @@ export default function UploadZone({ onFiles }) {
       <p style={{ fontSize: 14, color: "var(--text)", opacity: 0.7, marginBottom: 6 }}>
         Drop audio files here
       </p>
-      <p style={{ fontSize: 13, color: "var(--accent)" }}>or click to browse</p>
+      <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.5, marginTop: 8 }}>audio files or .zip albums</p>
+      <p style={{ fontSize: 13, color: "var(--accent)" }}>click to browse</p>
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept="audio/*,.flac,.aiff"
+        accept="audio/*,.flac,.aiff,.zip"
         style={{ display: "none" }}
         onChange={(e) => handle(e.target.files)}
       />
