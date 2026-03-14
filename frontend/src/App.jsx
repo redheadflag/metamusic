@@ -7,6 +7,8 @@ import BulkEditor   from "./BulkEditor.jsx";
 
 const API = "/api";
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
 function ProgressBar({ progress, label }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -22,6 +24,20 @@ function ProgressBar({ progress, label }) {
         {progress < 100 ? `${progress}%` : "Processing…"}
       </p>
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span style={{
+      display: "inline-block",
+      width: 14, height: 14,
+      border: "2px solid var(--border)",
+      borderTopColor: "var(--accent)",
+      borderRadius: "50%",
+      animation: "spin 0.7s linear infinite",
+      flexShrink: 0,
+    }} />
   );
 }
 
@@ -41,19 +57,50 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
+/** POST to an endpoint that now returns { job_id, status }.
+ *  Then polls GET /api/jobs/{job_id} every `interval` ms until complete/failed.
+ *  Calls onStatus(status) on each poll so the UI can update. */
+async function enqueueAndPoll(url, body, { onStatus, interval = 1500 } = {}) {
+  const res = await fetch(url, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+
+  const { job_id } = await res.json();
+
+  // poll until terminal state
+  while (true) {
+    await new Promise((r) => setTimeout(r, interval));
+    const poll = await fetch(`${API}/jobs/${job_id}`);
+    if (!poll.ok) throw new Error(`Poll failed: ${poll.status}`);
+    const data = await poll.json();
+    onStatus?.(data.status);
+
+    if (data.status === "complete") return data.result;
+    if (data.status === "failed")   throw new Error(data.error || "Job failed");
+    if (data.status === "not_found") throw new Error("Job not found — it may have expired");
+    // queued / in_progress → keep polling
+  }
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 // mode:  null | "files" | "soundcloud"
-// state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing" | "bulk-editing" | "saving" | "done" | "error"
+// state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing"
+//      | "bulk-editing" | "saving" | "done" | "error"
 
 export default function App() {
-  const [mode,     setMode]     = useState(null);
-  const [state,    setState]    = useState("idle");
-  const [progress, setProgress] = useState(0);
-  const [tracks,   setTracks]   = useState([]);
-  const [albums,   setAlbums]   = useState([]);
-  const [saved,    setSaved]    = useState([]);
-  const [error,    setError]    = useState(null);
+  const [mode,      setMode]      = useState(null);
+  const [state,     setState]     = useState("idle");
+  const [progress,  setProgress]  = useState(0);
+  const [jobStatus, setJobStatus] = useState(null); // "queued" | "in_progress"
+  const [tracks,    setTracks]    = useState([]);
+  const [albums,    setAlbums]    = useState([]);
+  const [saved,     setSaved]     = useState([]);
+  const [error,     setError]     = useState(null);
 
-  // ── file upload ──────────────────────────────────────────────────────────
+  // ── file upload ─────────────────────────────────────────────────────────
   async function handleFiles(files, type) {
     setState("uploading");
     setProgress(0);
@@ -77,7 +124,7 @@ export default function App() {
     }
   }
 
-  // ── SoundCloud fetch ─────────────────────────────────────────────────────
+  // ── SoundCloud fetch ────────────────────────────────────────────────────
   async function handleScFetch(url, type) {
     setState("sc-fetching");
     setError(null);
@@ -103,7 +150,7 @@ export default function App() {
     }
   }
 
-  // ── Remove album from bulk edit (clean up SC temp paths) ─────────────────
+  // ── remove album from bulk edit ─────────────────────────────────────────
   async function handleRemoveAlbum(album) {
     const tempPaths = (album.tracks || []).map((t) => t.temp_path).filter(Boolean);
     if (tempPaths.length === 0) return;
@@ -118,21 +165,18 @@ export default function App() {
     }
   }
 
-  // ── process (file-uploaded tracks) ──────────────────────────────────────
+  // ── process single/SC album ─────────────────────────────────────────────
   async function handleConfirm(meta) {
     setState("saving");
+    setJobStatus("queued");
     setError(null);
     try {
-      // SC tracks have no temp_path — use sc-process endpoint
-      const hasSc = meta.tracks?.some((t) => t.sc_url);
+      const hasSc    = meta.tracks?.some((t) => t.sc_url);
       const endpoint = hasSc ? `${API}/sc-process` : `${API}/process`;
-      const res = await fetch(endpoint, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(meta),
+      const result   = await enqueueAndPoll(endpoint, meta, {
+        onStatus: setJobStatus,
       });
-      if (!res.ok) throw new Error(await res.text());
-      setSaved((await res.json()).saved);
+      setSaved(result.saved);
       setState("done");
     } catch (e) {
       setError(e.message);
@@ -140,18 +184,18 @@ export default function App() {
     }
   }
 
-  // ── process (bulk zip albums) ────────────────────────────────────────────
+  // ── process bulk albums ──────────────────────────────────────────────────
   async function handleBulkConfirm(albumRequests) {
     setState("saving");
+    setJobStatus("queued");
     setError(null);
     try {
-      const res = await fetch(`${API}/process-bulk`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ albums: albumRequests }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      setSaved((await res.json()).saved);
+      const result = await enqueueAndPoll(
+        `${API}/process-bulk`,
+        { albums: albumRequests },
+        { onStatus: setJobStatus },
+      );
+      setSaved(result.saved);
       setState("done");
     } catch (e) {
       setError(e.message);
@@ -161,25 +205,27 @@ export default function App() {
 
   function reset() {
     setMode(null);
-    setTracks([]); setAlbums([]); setSaved([]); setProgress(0);
+    setTracks([]); setAlbums([]); setSaved([]);
+    setProgress(0); setJobStatus(null);
     setState("idle");
     setError(null);
   }
 
   function backToMode() {
     setTracks([]); setAlbums([]); setProgress(0); setError(null);
+    setJobStatus(null);
     setState("idle");
-    // keep mode so user lands back on the right input
   }
 
   const editingCount = state === "editing"      ? tracks.length
                      : state === "bulk-editing" ? albums.length
                      : 0;
-
   const showCount = state === "editing" || state === "bulk-editing";
 
   return (
     <>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
       <header style={{
         marginBottom: 40, paddingBottom: 20,
         borderBottom: "1px solid var(--border)",
@@ -231,8 +277,23 @@ export default function App() {
         <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={backToMode} onRemove={handleRemoveAlbum} />
       )}
 
+      {/* Job progress */}
       {state === "saving" && (
-        <p style={{ color: "var(--text)", opacity: 0.5 }}>Saving to library…</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Spinner />
+            <span style={{ fontSize: 14, color: "var(--text)", opacity: 0.7 }}>
+              {jobStatus === "queued"      && "Waiting in queue…"}
+              {jobStatus === "in_progress" && "Processing tracks…"}
+              {!jobStatus                  && "Submitting job…"}
+            </span>
+          </div>
+          {jobStatus === "in_progress" && (
+            <p style={{ fontSize: 12, color: "var(--text)", opacity: 0.4, margin: 0 }}>
+              This may take a few minutes for large albums or SoundCloud downloads.
+            </p>
+          )}
+        </div>
       )}
 
       {state === "done" && (

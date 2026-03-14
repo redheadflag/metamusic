@@ -1,4 +1,20 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
 from pydantic import BaseModel
+
+
+# ---------------------------------------------------------------------------
+# Job status
+# ---------------------------------------------------------------------------
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: Literal["queued", "in_progress", "complete", "not_found", "failed"]
+    result: Any | None = None
+    error: str | None = None
 
 
 class TrackMeta(BaseModel):

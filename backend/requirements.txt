@@ -7,3 +7,4 @@ python-dotenv
 httpx[socks]
 yt-dlp
 requests
+arq

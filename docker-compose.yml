@@ -1,4 +1,9 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --port ${REDIS_PORT:-6379}
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -6,6 +11,8 @@ services:
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
       HTTPS_PROXY: socks5://host.docker.internal:1080
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -13,6 +20,31 @@ services:
       - ./config:/app/config
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      - redis
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend
+          target: /app
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: arq worker.main.WorkerSettings
+    env_file: .env
+    environment:
+      YTDLP_CONFIG: /app/config/yt-dlp.conf
+      HTTPS_PROXY: socks5://host.docker.internal:1080
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MUSIC_LIBRARY_PATH}:/music
+      - ./config:/app/config
+    depends_on:
+      - redis
     develop:
       watch:
         - action: sync+restart
@@ -22,8 +54,8 @@ services:
   bot:
     build: ./backend
     restart: unless-stopped
-    env_file: .env
     command: python bot/main.py
+    env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     develop:

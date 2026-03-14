@@ -6,13 +6,27 @@ import logging
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import ProcessRequest, AlbumMeta, BulkProcessRequest, ScProcessRequest, TrackMeta
+from models import ProcessRequest, AlbumMeta, BulkProcessRequest, ScProcessRequest, TrackMeta, JobStatus
 from processing import read_tags, process_album
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
+import arq
+import arq.jobs
+from arq.connections import ArqRedis
+from worker.settings import get_redis_settings
+
+_redis_pool: ArqRedis | None = None
+
+
+async def _get_redis() -> ArqRedis:
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = await arq.create_pool(get_redis_settings())
+    return _redis_pool
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -23,7 +37,12 @@ async def lifespan(app):
         logger.warning(
             "SC_OAUTH_TOKEN not set — SoundCloud fetch may fail for private/gated content."
         )
+    await _get_redis()
+    logger.info("ARQ Redis pool ready")
     yield
+    if _redis_pool:
+        await _redis_pool.aclose()
+
 
 app = FastAPI(title="metamusic", lifespan=lifespan)
 
@@ -36,6 +55,10 @@ app.add_middleware(
 
 UPLOAD_DIR = tempfile.mkdtemp(prefix="metamusic_")
 
+
+# ---------------------------------------------------------------------------
+# Upload endpoints (unchanged)
+# ---------------------------------------------------------------------------
 
 @app.post("/api/upload")
 async def upload(files: list[UploadFile]):
@@ -61,60 +84,24 @@ async def upload(files: list[UploadFile]):
             "  cover_art    = %s\n"
             "  temp_path    = %s",
             i, len(files), file.filename,
-            meta.title,
-            meta.artist,
-            meta.album_artist,
-            meta.album,
-            meta.release_year,
-            meta.track_number,
+            meta.title, meta.artist, meta.album_artist, meta.album,
+            meta.release_year, meta.track_number,
             f"{len(meta.cover_art_b64) * 3 // 4} bytes" if meta.cover_art_b64 else "None",
             meta.temp_path,
         )
         results.append(meta)
-
     return results
 
 
-@app.post("/api/process")
-async def process(req: ProcessRequest):
-    """Embed confirmed metadata and save files to the music library."""
-    if not req.tracks:
-        raise HTTPException(400, "No tracks provided")
-
-    is_single = req.is_single
-
-    # Auto-fill album_artist from artist if missing
-    if not req.album_artist:
-        req = req.model_copy(update={"album_artist": req.artist})
-
-    # Singles: derive album name from track title
-    if is_single and not req.album:
-        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
-
-    if not req.album:
-        raise HTTPException(400, "album is required for multi-track uploads")
-
-    logger.info(
-        "Processing %d track(s): artist=%r album=%r year=%r",
-        len(req.tracks), req.artist, req.album, req.release_year,
-    )
-    saved = process_album(req)
-    logger.info("Saved: %s", saved)
-    return {"saved": saved}
-
 @app.post("/api/upload-zip")
 async def upload_zip(files: list[UploadFile]):
-    """
-    Receive one or more zip archives, extract audio files from each,
-    read their tags, and return a list of AlbumMeta (one per zip).
-    """
+    """Receive zip archives, extract audio, return AlbumMeta list."""
     import zipfile
 
     if not files:
         raise HTTPException(400, "No files provided")
 
     albums: list[AlbumMeta] = []
-
     for zf in files:
         if not (zf.filename or "").lower().endswith(".zip"):
             raise HTTPException(400, f"'{zf.filename}' is not a zip file")
@@ -128,7 +115,6 @@ async def upload_zip(files: list[UploadFile]):
                 (m for m in z.namelist()
                  if not m.startswith("__MACOSX") and
                     os.path.splitext(m.lower())[1] in audio_exts),
-                key=lambda n: n
             )
             if not members:
                 raise HTTPException(400, f"No audio files found in '{zf.filename}'")
@@ -158,39 +144,98 @@ async def upload_zip(files: list[UploadFile]):
             release_year=first.release_year,
             cover_art_b64=first.cover_art_b64,
         ))
-
     return albums
 
 
-@app.post("/api/process-bulk")
+# ---------------------------------------------------------------------------
+# Process endpoints — enqueue jobs, return 202 + job_id
+# ---------------------------------------------------------------------------
+
+@app.post("/api/process", response_model=JobStatus, status_code=202)
+async def process(req: ProcessRequest):
+    """Enqueue album-processing job. Poll GET /api/jobs/{job_id} for result."""
+    if not req.tracks:
+        raise HTTPException(400, "No tracks provided")
+    if not req.album and not req.is_single:
+        raise HTTPException(400, "album is required for multi-track uploads")
+
+    redis = await _get_redis()
+    job = await redis.enqueue_job("process_album_task", req.model_dump())
+    logger.info("Enqueued process_album_task as job %s", job.job_id)
+    return JobStatus(job_id=job.job_id, status="queued")
+
+
+@app.post("/api/sc-process", response_model=JobStatus, status_code=202)
+async def sc_process(req: ScProcessRequest):
+    """Enqueue SoundCloud download+process job."""
+    if not req.tracks:
+        raise HTTPException(400, "No tracks provided")
+    if not req.album and not req.is_single:
+        raise HTTPException(400, "album is required")
+
+    redis = await _get_redis()
+    job = await redis.enqueue_job("sc_process_task", req.model_dump())
+    logger.info("Enqueued sc_process_task as job %s", job.job_id)
+    return JobStatus(job_id=job.job_id, status="queued")
+
+
+@app.post("/api/process-bulk", response_model=JobStatus, status_code=202)
 async def process_bulk(req: BulkProcessRequest):
-    """Process multiple albums at once (e.g. from zip uploads)."""
+    """Enqueue bulk (multi-album) processing job."""
     if not req.albums:
         raise HTTPException(400, "No albums provided")
 
-    all_saved = []
-    for album_req in req.albums:
-        if not album_req.album_artist:
-            album_req = album_req.model_copy(update={"album_artist": album_req.artist})
-        if not album_req.album:
-            raise HTTPException(400, "album is required for each entry")
-
-        logger.info("Bulk processing: artist=%r album=%r tracks=%d",
-                    album_req.artist, album_req.album, len(album_req.tracks))
-
-        is_sc = any(t.sc_url for t in album_req.tracks)
-        if is_sc:
-            sc_req = album_req.model_copy()
-            saved = await _process_sc_album(sc_req)
-        else:
-            saved = process_album(album_req)
-        all_saved.extend(saved)
-
-    return {"saved": all_saved}
+    redis = await _get_redis()
+    job = await redis.enqueue_job("process_bulk_task", req.model_dump())
+    logger.info("Enqueued process_bulk_task as job %s", job.job_id)
+    return JobStatus(job_id=job.job_id, status="queued")
 
 
 # ---------------------------------------------------------------------------
-# SoundCloud endpoints
+# Job status polling
+# ---------------------------------------------------------------------------
+
+@app.get("/api/jobs/{job_id}", response_model=JobStatus)
+async def get_job_status(job_id: str):
+    """
+    Poll a job's status.
+
+    statuses:
+      queued       — waiting in queue
+      in_progress  — worker is running it
+      complete     — finished; `result` holds the output
+      failed       — task raised an exception; `error` holds the message
+      not_found    — unknown / expired job_id
+    """
+    redis = await _get_redis()
+    job = arq.jobs.Job(job_id, redis)
+    info = await job.info()
+
+    if info is None:
+        return JobStatus(job_id=job_id, status="not_found")
+
+    arq_status = await job.status()
+
+    if arq_status == arq.jobs.JobStatus.complete:
+        try:
+            result = await job.result(timeout=0)
+            return JobStatus(job_id=job_id, status="complete", result=result)
+        except Exception as exc:
+            return JobStatus(job_id=job_id, status="failed", error=str(exc))
+
+    if arq_status == arq.jobs.JobStatus.not_found:
+        return JobStatus(job_id=job_id, status="not_found")
+
+    status_map = {
+        arq.jobs.JobStatus.queued:      "queued",
+        arq.jobs.JobStatus.deferred:    "queued",
+        arq.jobs.JobStatus.in_progress: "in_progress",
+    }
+    return JobStatus(job_id=job_id, status=status_map.get(arq_status, "queued"))
+
+
+# ---------------------------------------------------------------------------
+# SoundCloud metadata-fetch endpoints (fast, no queue)
 # ---------------------------------------------------------------------------
 
 from concurrent.futures import ThreadPoolExecutor
@@ -200,17 +245,13 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _run_blocking(fn, *args):
-    """Run a blocking function in a thread pool."""
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(_executor, fn, *args)
 
 
 @app.post("/api/sc-fetch")
 async def sc_fetch(body: dict):
-    """
-    Fetch metadata from a SoundCloud URL using the SC API v2.
-    Returns TrackMeta list pre-filled from API response.
-    """
+    """Fetch metadata from a SoundCloud URL via SC API v2."""
     from yt_sc_fetch.sc_api import resolve_url
 
     url = (body.get("url") or "").strip()
@@ -218,7 +259,6 @@ async def sc_fetch(body: dict):
         raise HTTPException(400, "url is required")
 
     logger.info("SC fetch: %s", url)
-
     try:
         tracks = await _run_blocking(resolve_url, url)
     except Exception as e:
@@ -233,10 +273,10 @@ async def sc_fetch(body: dict):
 
 
 async def _process_sc_album(req) -> list[str]:
-    """
-    Shared SC download+convert logic used by both sc_process and process_bulk.
-    """
-    import base64, tempfile as tf, shutil
+    """Shared SC download+convert logic (called by worker tasks)."""
+    import base64
+    import tempfile as tf
+    import shutil
     from processing import _to_mp3, _safe, _find_ci, MUSIC_LIBRARY_PATH
 
     is_single = getattr(req, "is_single", False)
@@ -298,7 +338,10 @@ async def _process_sc_album(req) -> list[str]:
             ])
             if result.returncode != 0:
                 raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
-            mp3 = next((os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".mp3")), None)
+            mp3 = next(
+                (os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".mp3")),
+                None,
+            )
             if not mp3:
                 raise RuntimeError("yt-dlp produced no mp3 file")
             _to_mp3(mp3, dest, meta, art)
@@ -315,26 +358,9 @@ async def _process_sc_album(req) -> list[str]:
     return saved
 
 
-@app.post("/api/sc-process")
-async def sc_process(req: ScProcessRequest):
-    """Download SoundCloud tracks, convert to MP3, embed confirmed metadata."""
-    if not req.tracks:
-        raise HTTPException(400, "No tracks provided")
-    if not req.album and not req.is_single:
-        raise HTTPException(400, "album is required")
-    try:
-        saved = await _process_sc_album(req)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    logger.info("SC saved: %s", saved)
-    return {"saved": saved}
-
 @app.post("/api/sc-fetch-artist")
 async def sc_fetch_artist(body: dict):
-    """
-    Fetch all albums and loose tracks for a SoundCloud artist profile URL.
-    Returns a list of AlbumMeta objects (one per playlist + one for loose tracks).
-    """
+    """Fetch all albums for a SoundCloud artist profile URL."""
     from yt_sc_fetch.sc_api import resolve_artist
 
     url = (body.get("url") or "").strip()
@@ -354,10 +380,7 @@ async def sc_fetch_artist(body: dict):
 
 @app.delete("/api/cancel")
 async def cancel_tracks(body: dict):
-    """
-    Remove temp files for tracks the user excluded from batch processing.
-    Accepts { "temp_paths": [...] }
-    """
+    """Remove temp files for tracks the user excluded from batch processing."""
     import shutil
     temp_paths = body.get("temp_paths") or []
     removed = []
