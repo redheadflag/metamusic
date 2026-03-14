@@ -5,6 +5,8 @@ services:
     env_file: .env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${MUSIC_LIBRARY_PATH}:/music
       - ./config:/app/config
