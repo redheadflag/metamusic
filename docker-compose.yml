@@ -3,9 +3,11 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file: .env
+    environment:
+      YTDLP_CONFIG: /app/config/yt-dlp.conf
     volumes:
       - ${MUSIC_LIBRARY_PATH}:/music
-      - ./cookies.txt:/app/cookies.txt
+      - ./config:/app/config
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     develop:
