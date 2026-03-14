@@ -6,13 +6,27 @@ import logging
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import ProcessRequest, AlbumMeta, BulkProcessRequest, TrackMeta
+from models import ProcessRequest, AlbumMeta, BulkProcessRequest
 from processing import read_tags, process_album
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="metamusic")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    from yt_sc_fetch.sc_api import SC_OAUTH_TOKEN
+    if SC_OAUTH_TOKEN:
+        logger.info("SoundCloud credentials loaded")
+    else:
+        logger.warning(
+            "SC_CLIENT_ID or SC_OAUTH_TOKEN not set — SoundCloud fetch will fail. "
+            "Get them from browser devtools on soundcloud.com."
+        )
+    yield
+
+app = FastAPI(title="metamusic", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -190,13 +204,10 @@ def _run_blocking(fn, *args):
 @app.post("/api/sc-fetch")
 async def sc_fetch(body: dict):
     """
-    Fetch metadata from a SoundCloud URL (track or playlist/album).
-    Returns TrackMeta list pre-filled from yt-dlp info dicts.
+    Fetch metadata from a SoundCloud URL using the SC API v2.
+    Returns TrackMeta list pre-filled from API response.
     """
-    from yt_sc_fetch.sc import fetch_sc_entries
-    from yt_sc_fetch.metadata import parse_sc_metadata
-    from yt_sc_fetch.audio import fetch_cover_art
-    import base64
+    from yt_sc_fetch.sc_api import resolve_url
 
     url = (body.get("url") or "").strip()
     if not url:
@@ -205,32 +216,15 @@ async def sc_fetch(body: dict):
     logger.info("SC fetch: %s", url)
 
     try:
-        entries = await _run_blocking(fetch_sc_entries, url)
-    except SystemExit as e:
-        raise HTTPException(400, f"yt-dlp error: {e}")
+        tracks = await _run_blocking(resolve_url, url)
+    except Exception as e:
+        logger.error("SC API error: %s", e)
+        raise HTTPException(400, str(e))
 
-    results = []
-    for i, raw in enumerate(entries, 1):
-        meta  = parse_sc_metadata(raw, track_number=i if len(entries) > 1 else None)
-        cover_bytes = await _run_blocking(fetch_cover_art, raw)
-        cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
-
-        sc_url = raw.get("webpage_url") or raw.get("url") or ""
-        results.append(TrackMeta(
-            temp_path="",
-            file_name=f"{meta['track']}.mp3",
-            title=meta["track"],
-            artist=meta["artist"],
-            album_artist=meta["album_artist"],
-            album=meta["album"],
-            release_year=meta["release_year"],
-            track_number=meta["track_number"],
-            cover_art_b64=cover_b64,
-            sc_url=sc_url,
-        ))
+    results = [TrackMeta(**t) for t in tracks]
+    for i, t in enumerate(results, 1):
         logger.info("SC entry %d: title=%r artist=%r album=%r url=%s",
-                    i, meta["track"], meta["artist"], meta["album"], sc_url)
-
+                    i, t.title, t.artist, t.album, t.sc_url)
     return results
 
 
