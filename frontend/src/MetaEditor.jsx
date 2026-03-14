@@ -77,6 +77,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
     album:         first.album,
     release_year:  first.release_year,
     cover_art_b64: first.cover_art_b64 ?? null,
+    publisher:     "",
   });
 
   const [rows, setRows] = useState(() =>
@@ -139,6 +140,9 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         ...r.track,
         title:        r.title,
         track_number: isSingle ? null : r.track_number,
+        composer:     r.composer  || null,
+        language:     r.language  || null,
+        lyrics:       r.lyrics    || null,
       })),
     });
   }
@@ -182,6 +186,9 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
               <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
             </>
           )}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Field label="Publisher" value={shared.publisher} onChange={set("publisher")} />
+          </div>
         </div>
       </div>
 
@@ -264,7 +271,30 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
               }}>
                 {r.track.file_name}
               </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setRows((rs) => rs.map((row, j) => j === i ? { ...row, showExtra: !row.showExtra } : row)); }}
+                draggable={false}
+                onDragStart={(e) => e.stopPropagation()}
+                style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, opacity: 0.5 }}
+              >
+                {r.showExtra ? "Less ▴" : "More ▾"}
+              </button>
             </div>
+            {r.showExtra && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "8px 8px 8px 44px" }}>
+                <Field label="Composer" value={r.composer} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, composer: v } : row))} />
+                <Field label="Language" value={r.language} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, language: v } : row))} />
+                <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Lyrics</label>
+                  <textarea
+                    value={r.lyrics}
+                    onChange={(e) => { const v = e.target.value; setRows((rs) => rs.map((row, j) => j === i ? { ...row, lyrics: v } : row)); }}
+                    rows={4}
+                    style={{ font: "inherit", background: "var(--bg)", color: "var(--text-h)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 10px", resize: "vertical", width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+              </div>
+            )}
           );
         })}
       </div>

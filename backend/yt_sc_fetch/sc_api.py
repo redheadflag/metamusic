@@ -12,10 +12,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SC_API        = "https://api-v2.soundcloud.com"
-SC_CLIENT_ID  = os.environ.get("SC_CLIENT_ID", "")
+SC_API = "https://api-v2.soundcloud.com"
+SC_CLIENT_ID = os.environ.get("SC_CLIENT_ID", "")
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-HTTPS_PROXY   = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
+HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
 
 def _client() -> httpx.Client:
@@ -71,20 +71,20 @@ def _fetch_cover(artwork_url: Optional[str]) -> Optional[bytes]:
 def _parse_track(raw: dict, index: int, total: int) -> dict:
     pub_meta = raw.get("publisher_metadata") or {}
 
-    title  = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
+    title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
     artist = (
         pub_meta.get("artist")
         or raw.get("user", {}).get("username")
         or "Unknown Artist"
     )
-    album        = pub_meta.get("album_title") or ""
+    album = pub_meta.get("album_title") or ""
     release_year = (raw.get("created_at") or "")[:4]
 
-    artwork_url  = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
-    cover_bytes  = _fetch_cover(artwork_url)
-    cover_b64    = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+    artwork_url = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
+    cover_bytes = _fetch_cover(artwork_url)
+    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
 
-    sc_url       = raw.get("permalink_url") or ""
+    sc_url = raw.get("permalink_url") or ""
     track_number = index if total > 1 else None
 
     return dict(
