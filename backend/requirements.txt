@@ -4,6 +4,6 @@ python-multipart
 mutagen
 aiogram>=3.0
 python-dotenv
-httpx
+httpx[socks]
 yt-dlp
 requests

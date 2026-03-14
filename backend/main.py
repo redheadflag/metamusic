@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import ProcessRequest, AlbumMeta, BulkProcessRequest
+from models import ProcessRequest, AlbumMeta, BulkProcessRequest, TrackMeta
 from processing import read_tags, process_album
 
 logging.basicConfig(

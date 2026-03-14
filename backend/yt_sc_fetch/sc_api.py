@@ -1,98 +1,57 @@
 """
-SoundCloud API v2 client.
-Uses api-v2.soundcloud.com with OAuth token + auto-fetched client_id.
-
-client_id is scraped from SoundCloud's own JS bundle on first use and cached.
-oauth_token comes from SC_OAUTH_TOKEN env var.
+SoundCloud API v2 client using httpx for better TLS fingerprinting.
 """
 
 import base64
 import os
-import urllib.request
-import urllib.parse
-import json
 import re
 import logging
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-SC_API = "https://api-v2.soundcloud.com"
+SC_API        = "https://api-v2.soundcloud.com"
+SC_CLIENT_ID  = os.environ.get("SC_CLIENT_ID", "")
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-
-_client_id_cache: str = ""
-
-
-def _fetch_client_id() -> str:
-    """
-    Scrape a fresh client_id from SoundCloud's homepage JS bundle.
-    SC embeds it in their app scripts as client_id:"<value>".
-    """
-    logger.info("Fetching fresh SoundCloud client_id from JS bundle...")
-    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    req = urllib.request.Request("https://soundcloud.com", headers={"User-Agent": ua})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        html = resp.read().decode("utf-8", errors="ignore")
-
-    script_urls = re.findall(r'<script[^>]+src="(https://[^"]+\.js)"', html)
-    for script_url in reversed(script_urls):
-        try:
-            req = urllib.request.Request(script_url, headers={"User-Agent": ua})
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                js = resp.read().decode("utf-8", errors="ignore")
-            match = re.search(r'client_id\s*[=:]\s*["\']([a-zA-Z0-9_-]{20,})["\']', js)
-            if match:
-                cid = match.group(1)
-                logger.info("Found client_id: %s…", cid[:8])
-                return cid
-        except Exception as e:
-            logger.debug("Script %s failed: %s", script_url, e)
-
-    raise RuntimeError("Could not extract client_id from SoundCloud JS bundle")
+HTTPS_PROXY   = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
 
-def _get_client_id() -> str:
-    global _client_id_cache
-    if not _client_id_cache:
-        _client_id_cache = _fetch_client_id()
-    return _client_id_cache
-
-
-def _headers() -> dict:
-    h = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+def _client() -> httpx.Client:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://soundcloud.com/",
         "Origin": "https://soundcloud.com",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
     }
     if SC_OAUTH_TOKEN:
-        h["Authorization"] = f"OAuth {SC_OAUTH_TOKEN}"
-    return h
+        headers["Authorization"] = f"OAuth {SC_OAUTH_TOKEN}"
+
+    return httpx.Client(
+        headers=headers,
+        proxy=HTTPS_PROXY,
+        timeout=30,
+        follow_redirects=True,
+    )
 
 
 def _get(path: str, params: dict | None = None) -> dict | list:
-    global _client_id_cache
     p = dict(params or {})
-    p["client_id"] = _get_client_id()
-    query = urllib.parse.urlencode(p)
-    url = f"{SC_API}{path}?{query}"
-    logger.info("SC API: GET %s", url)
-    req = urllib.request.Request(url, headers=_headers())
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            # client_id stale — scrape a fresh one and retry once
-            logger.warning("client_id rejected (%s), refreshing...", e.code)
-            _client_id_cache = ""
-            p["client_id"] = _get_client_id()
-            query = urllib.parse.urlencode(p)
-            url = f"{SC_API}{path}?{query}"
-            req = urllib.request.Request(url, headers=_headers())
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return json.loads(resp.read())
-        raise
+    if SC_CLIENT_ID:
+        p["client_id"] = SC_CLIENT_ID
+
+    url = f"{SC_API}{path}"
+    logger.info("SC API: GET %s params=%s", url, p)
+
+    with _client() as client:
+        resp = client.get(url, params=p)
+        resp.raise_for_status()
+        return resp.json()
 
 
 def _fetch_cover(artwork_url: Optional[str]) -> Optional[bytes]:
@@ -100,9 +59,10 @@ def _fetch_cover(artwork_url: Optional[str]) -> Optional[bytes]:
         return None
     url = re.sub(r"-(large|t500x500|small|badge|tiny|crop)\b", "-t500x500", artwork_url)
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return resp.read()
+        with _client() as client:
+            resp = client.get(url, timeout=20)
+            resp.raise_for_status()
+            return resp.content
     except Exception as e:
         logger.warning("Could not fetch cover art: %s", e)
         return None
@@ -111,18 +71,20 @@ def _fetch_cover(artwork_url: Optional[str]) -> Optional[bytes]:
 def _parse_track(raw: dict, index: int, total: int) -> dict:
     pub_meta = raw.get("publisher_metadata") or {}
 
-    title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
+    title  = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
     artist = (
         pub_meta.get("artist")
         or raw.get("user", {}).get("username")
         or "Unknown Artist"
     )
-    album = pub_meta.get("album_title") or ""
-    year = (raw.get("created_at") or "")[:4]
-    artwork_url = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
-    cover_bytes = _fetch_cover(artwork_url)
-    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
-    sc_url = raw.get("permalink_url") or ""
+    album        = pub_meta.get("album_title") or ""
+    release_year = (raw.get("created_at") or "")[:4]
+
+    artwork_url  = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
+    cover_bytes  = _fetch_cover(artwork_url)
+    cover_b64    = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+
+    sc_url       = raw.get("permalink_url") or ""
     track_number = index if total > 1 else None
 
     return dict(
@@ -130,7 +92,7 @@ def _parse_track(raw: dict, index: int, total: int) -> dict:
         artist=artist,
         album_artist=artist,
         album=album,
-        release_year=year,
+        release_year=release_year,
         track_number=track_number,
         cover_art_b64=cover_b64,
         sc_url=sc_url,
@@ -146,7 +108,7 @@ def resolve_url(sc_url: str) -> list[dict]:
     """
     data = _get("/resolve", {"url": sc_url})
     kind = data.get("kind")
-    logger.info("Resolved %s → kind=%s", sc_url, kind)
+    logger.info("Resolved %s → kind=%s id=%s", sc_url, kind, data.get("id"))
 
     if kind == "track":
         return [_parse_track(data, 1, 1)]
