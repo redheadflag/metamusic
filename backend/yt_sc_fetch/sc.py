@@ -12,6 +12,16 @@ from .metadata import (
 from .utils    import log, die, run, safe_name
 
 SC_SEARCH_RESULTS = 10  # results per scsearch query
+COOKIES_PATH = "/app/cookies.txt"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+
+def _ytdlp_base() -> list[str]:
+    cmd = ["yt-dlp", "--user-agent", UA, "--add-header", "Referer:https://soundcloud.com"]
+    if os.path.exists(COOKIES_PATH):
+        cmd += ["--cookies", COOKIES_PATH]
+        log("Using cookies file")
+    return cmd
 
 
 # ---------------------------------------------------------------------------
@@ -21,8 +31,7 @@ SC_SEARCH_RESULTS = 10  # results per scsearch query
 def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
     search_url = f"scsearch{n}:{query}"
     log(f"  SC search: {search_url!r}")
-    result = run([
-        "yt-dlp",
+    result = run(_ytdlp_base() + [
         "--dump-json",
         "--flat-playlist",
         "--no-playlist",
@@ -83,7 +92,7 @@ def fetch_full_sc_track_info(track: dict) -> dict:
     if not url:
         return track
     log(f"Fetching full SC track info: {url}")
-    result = run(["yt-dlp", "--dump-json", "--no-playlist", "--skip-download", url])
+    result = run(_ytdlp_base() + ["--dump-json", "--no-playlist", "--skip-download", url])
     if result.returncode != 0:
         return track
     try:
@@ -102,8 +111,7 @@ def fetch_sc_entries(sc_url: str) -> list[dict]:
     Works for single tracks, playlists, and albums.
     """
     log(f"Fetching SoundCloud entries for: {sc_url}")
-    result = run([
-        "yt-dlp",
+    result = run(_ytdlp_base() + [
         "--dump-json",
         "--yes-playlist",
         "--skip-download",

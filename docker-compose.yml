@@ -5,6 +5,7 @@ services:
     env_file: .env
     volumes:
       - ${MUSIC_LIBRARY_PATH}:/music
+      - ./cookies.txt:/app/cookies.txt
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     develop:
