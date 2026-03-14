@@ -55,19 +55,22 @@ def safe_name(s: str) -> str:
 # Step 1 – YouTube metadata
 # ---------------------------------------------------------------------------
 
+
 def fetch_playlist_entries(url: str) -> list[dict]:
     """
     Return a list of raw yt-dlp info dicts for every entry in *url*.
     Works for both single videos and playlists/albums.
     """
     log(f"Fetching YouTube entries for: {url}")
-    result = run([
-        "yt-dlp",
-        "--dump-json",   # one JSON object per line
-        "--yes-playlist",
-        "--skip-download",
-        url,
-    ])
+    result = run(
+        [
+            "yt-dlp",
+            "--dump-json",  # one JSON object per line
+            "--yes-playlist",
+            "--skip-download",
+            url,
+        ]
+    )
     entries = []
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -98,13 +101,9 @@ def parse_metadata(raw: dict, track_number: int | None = None) -> dict:
         m = re.split(r"\s*[—–-]\s*", track, maxsplit=1)
         if len(m) == 2:
             artist = m[0].strip()
-            track  = m[1].strip()
+            track = m[1].strip()
         else:
-            artist = (
-                raw.get("uploader")
-                or raw.get("channel")
-                or "Unknown Artist"
-            )
+            artist = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
 
     # Album artist = first artist when there are multiple (e.g. "A, B, C")
     album_artist = artist.split(",")[0].strip()
@@ -131,10 +130,10 @@ def parse_metadata(raw: dict, track_number: int | None = None) -> dict:
     release_year = (
         raw.get("release_year")
         or str(raw.get("release_date", ""))[:4]
-        or str(raw.get("upload_date",  ""))[:4]
+        or str(raw.get("upload_date", ""))[:4]
         or "0000"
     )
-    tags     = raw.get("tags") or []
+    tags = raw.get("tags") or []
     duration = int(raw.get("duration") or 0)
 
     return dict(
@@ -153,16 +152,19 @@ def parse_metadata(raw: dict, track_number: int | None = None) -> dict:
 # Step 2 – SoundCloud search via yt-dlp scsearch extractor
 # ---------------------------------------------------------------------------
 
+
 def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
     search_url = f"scsearch{n}:{query}"
     log(f"  SC search: {search_url!r}")
-    result = run([
-        "yt-dlp",
-        "--dump-json",
-        "--flat-playlist",
-        "--no-playlist",
-        search_url,
-    ])
+    result = run(
+        [
+            "yt-dlp",
+            "--dump-json",
+            "--flat-playlist",
+            "--no-playlist",
+            search_url,
+        ]
+    )
     tracks = []
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -177,10 +179,14 @@ def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
 
 def _normalize(s: str) -> str:
     """Lowercase and strip curly/typographic quotes and apostrophes for fuzzy comparison."""
-    return s.lower().translate(str.maketrans("\u2018\u2019\u201c\u201d\u02bc\u0060", "''\"\"''"))
+    return s.lower().translate(
+        str.maketrans("\u2018\u2019\u201c\u201d\u02bc\u0060", "''\"\"''")
+    )
 
 
-def find_best_sc_track(album_artist: str, track_title: str, target_duration: int) -> dict:
+def find_best_sc_track(
+    album_artist: str, track_title: str, target_duration: int
+) -> dict:
     """
     Try two queries in order, return the first track whose:
       • title contains track_title (case-insensitive, punctuation-normalised)
@@ -193,7 +199,7 @@ def find_best_sc_track(album_artist: str, track_title: str, target_duration: int
         f"{album_artist} {track_title}",
         track_title,
     ]
-    needle       = _normalize(track_title)
+    needle = _normalize(track_title)
     artist_lower = _normalize(album_artist)
 
     for query in queries:
@@ -203,33 +209,33 @@ def find_best_sc_track(album_artist: str, track_title: str, target_duration: int
 
         for t in results:
             title = _normalize(t.get("title") or "")
-            dur   = int(float(t.get("duration") or 0))
-            title_ok  = needle in title
+            dur = int(float(t.get("duration") or 0))
+            title_ok = needle in title
             # If the album_artist name is already in the SC title we trust the
             # match and skip the duration gate (might be a shorter clip/edit).
             artist_in_title = artist_lower in title
             dur_ok = artist_in_title or abs(dur - target_duration) <= duration_tolerance
 
-            log(f"  • '{t.get('title')}' | {dur}s "
-                f"| title={title_ok} dur={dur_ok} artist_in_title={artist_in_title}")
+            log(
+                f"  • '{t.get('title')}' | {dur}s "
+                f"| title={title_ok} dur={dur_ok} artist_in_title={artist_in_title}"
+            )
 
             if title_ok and dur_ok:
                 log(f"  ✓ '{t.get('title')}' @ {t.get('url') or t.get('webpage_url')}")
                 return t
 
-    return {}   # caller decides what to do with a miss
+    return {}  # caller decides what to do with a miss
 
 
 # ---------------------------------------------------------------------------
 # Download + cover art
 # ---------------------------------------------------------------------------
 
+
 def _track_url(track: dict) -> str:
     return (
-        track.get("webpage_url")
-        or track.get("url")
-        or track.get("permalink_url")
-        or ""
+        track.get("webpage_url") or track.get("url") or track.get("permalink_url") or ""
     )
 
 
@@ -252,7 +258,9 @@ def fetch_cover_art(track_info: dict) -> bytes | None:
     if not artwork_url:
         thumbnails = track_info.get("thumbnails") or []
         if thumbnails:
-            best = max(thumbnails, key=lambda t: t.get("width") or t.get("preference") or 0)
+            best = max(
+                thumbnails, key=lambda t: t.get("width") or t.get("preference") or 0
+            )
             artwork_url = best.get("url")
     if not artwork_url:
         log("No cover art URL found.")
@@ -274,18 +282,24 @@ def download_sc_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
         die("Could not determine a URL for the selected SoundCloud track.")
     log(f"Downloading: {url}")
     output_tmpl = os.path.join(MUSIC_LIBRARY_PATH, "%(id)s.%(ext)s")
-    result = run([
-        "yt-dlp",
-        "--no-playlist",
-        "--format",        "bestaudio/best",
-        "--extract-audio",
-        "--audio-format",  "mp3",
-        "--audio-quality", "0",
-        "--no-embed-metadata",
-        "--no-embed-thumbnail",
-        "--output",        output_tmpl,
-        url,
-    ])
+    result = run(
+        [
+            "yt-dlp",
+            "--no-playlist",
+            "--format",
+            "bestaudio/best",
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "0",
+            "--no-embed-metadata",
+            "--no-embed-thumbnail",
+            "--output",
+            output_tmpl,
+            url,
+        ]
+    )
     if result.returncode != 0:
         die(f"yt-dlp download failed:\n{result.stderr}")
     for fname in os.listdir(MUSIC_LIBRARY_PATH):
@@ -298,11 +312,20 @@ def download_sc_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
 # Step 3 – Embed metadata + cover art
 # ---------------------------------------------------------------------------
 
+
 def embed_metadata(mp3_path: str, meta: dict, cover_art: bytes | None) -> None:
     try:
         from mutagen.id3 import (
-            ID3, ID3NoHeaderError,
-            TPE1, TPE2, TALB, TIT2, TDRC, TCON, TRCK, APIC,
+            ID3,
+            ID3NoHeaderError,
+            TPE1,
+            TPE2,
+            TALB,
+            TIT2,
+            TDRC,
+            TCON,
+            TRCK,
+            APIC,
         )
     except ImportError:
         die("mutagen is not installed.  Run: pip install mutagen")
@@ -314,14 +337,16 @@ def embed_metadata(mp3_path: str, meta: dict, cover_art: bytes | None) -> None:
         tags = ID3()
 
     tags.clear()
-    tags.add(TPE1(encoding=3, text=meta["artist"]))           # Artist
-    tags.add(TPE2(encoding=3, text=meta["album_artist"]))     # Album artist
-    tags.add(TALB(encoding=3, text=meta["album"]))            # Album
-    tags.add(TIT2(encoding=3, text=meta["track"]))            # Title
+    tags.add(TPE1(encoding=3, text=meta["artist"]))  # Artist
+    tags.add(TPE2(encoding=3, text=meta["album_artist"]))  # Album artist
+    tags.add(TALB(encoding=3, text=meta["album"]))  # Album
+    tags.add(TIT2(encoding=3, text=meta["track"]))  # Title
     tags.add(TDRC(encoding=3, text=str(meta["release_year"])))  # Year
 
     if meta.get("track_number") is not None:
-        tags.add(TRCK(encoding=3, text=str(meta["track_number"])))  # Track number (playlist position)
+        tags.add(
+            TRCK(encoding=3, text=str(meta["track_number"]))
+        )  # Track number (playlist position)
 
     if meta["tags"]:
         tags.add(TCON(encoding=3, text="; ".join(meta["tags"][:5])))
@@ -338,7 +363,10 @@ def embed_metadata(mp3_path: str, meta: dict, cover_art: bytes | None) -> None:
 # Process a single track entry end-to-end
 # ---------------------------------------------------------------------------
 
-def process_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None = None) -> str | None:
+
+def process_entry(
+    raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None = None
+) -> str | None:
     """
     Process one YouTube entry (video).
     Returns None on success, or a human-readable label string if skipped.
@@ -354,10 +382,12 @@ def process_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None =
         return label
 
     sc_track_full = fetch_full_track_info(sc_track)
-    cover_art     = fetch_cover_art(sc_track_full)
+    cover_art = fetch_cover_art(sc_track_full)
 
     # Build output path:  output/<album_artist>/<album>/<artist> — <track>.mp3
-    out_dir = os.path.join(MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"]))
+    out_dir = os.path.join(
+        MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"])
+    )
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"
     final_path = os.path.join(out_dir, safe_file_name)
@@ -376,19 +406,22 @@ def process_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None =
 # SoundCloud direct mode
 # ---------------------------------------------------------------------------
 
+
 def fetch_sc_entries(sc_url: str) -> list[dict]:
     """
     Fetch all track entries from a SoundCloud URL via yt-dlp.
     Works for single tracks, playlists, and albums.
     """
     log(f"Fetching SoundCloud entries for: {sc_url}")
-    result = run([
-        "yt-dlp",
-        "--dump-json",
-        "--yes-playlist",
-        "--skip-download",
-        sc_url,
-    ])
+    result = run(
+        [
+            "yt-dlp",
+            "--dump-json",
+            "--yes-playlist",
+            "--skip-download",
+            sc_url,
+        ]
+    )
     entries = []
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -409,17 +442,17 @@ def parse_sc_metadata(raw: dict, track_number: int | None = None) -> dict:
     Extract metadata from a SoundCloud yt-dlp info dict.
     SoundCloud fields: uploader = artist name, title = track title.
     """
-    artist       = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
+    artist = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
     album_artist = artist.split(",")[0].strip()
-    artist       = album_artist  # artist always matches album_artist
-    track        = raw.get("title") or "Unknown Track"
-    album        = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
+    artist = album_artist  # artist always matches album_artist
+    track = raw.get("title") or "Unknown Track"
+    album = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
     release_year = (
         str(raw.get("release_date", ""))[:4]
-        or str(raw.get("upload_date",  ""))[:4]
+        or str(raw.get("upload_date", ""))[:4]
         or "0000"
     )
-    tags     = raw.get("tags") or []
+    tags = raw.get("tags") or []
     duration = int(raw.get("duration") or 0)
 
     return dict(
@@ -445,24 +478,23 @@ def display_metadata(meta: dict) -> None:
         print(f"│  Track #      : {meta['track_number']}")
     print(f"│  Year         : {meta['release_year']}")
     print(f"│  Duration     : {meta['duration']}s")
-    if meta['tags']:
+    if meta["tags"]:
         print(f"│  Tags         : {', '.join(meta['tags'][:8])}")
     print("└────────────────────────────────────────\n")
-
 
 
 def apply_sc_overrides(meta: dict, overrides: dict) -> dict:
     """Merge user-supplied override values into a parsed meta dict."""
     meta = dict(meta)
     if overrides.get("artist"):
-        meta["artist"]       = overrides["artist"]
+        meta["artist"] = overrides["artist"]
         meta["album_artist"] = overrides["artist"].split(",")[0].strip()
     if overrides.get("album_artist"):
         meta["album_artist"] = overrides["album_artist"]
     if overrides.get("album"):
-        meta["album"]        = overrides["album"]
+        meta["album"] = overrides["album"]
     if overrides.get("track"):
-        meta["track"]        = overrides["track"]
+        meta["track"] = overrides["track"]
     if overrides.get("year"):
         meta["release_year"] = overrides["year"]
     return meta
@@ -484,18 +516,24 @@ def validate_sc_overrides(overrides: dict, is_playlist: bool) -> None:
         )
 
 
-def process_sc_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | None = None,
-                     overrides: dict | None = None) -> None:
+def process_sc_entry(
+    raw: dict,
+    MUSIC_LIBRARY_PATH: str,
+    track_number: int | None = None,
+    overrides: dict | None = None,
+) -> None:
     """Parse SC metadata from one raw entry, display it, download and tag."""
-    meta      = parse_sc_metadata(raw, track_number=track_number)
+    meta = parse_sc_metadata(raw, track_number=track_number)
     if overrides:
-        meta  = apply_sc_overrides(meta, overrides)
+        meta = apply_sc_overrides(meta, overrides)
     cover_art = fetch_cover_art(raw)
 
     display_metadata(meta)
 
     # Build output path:  output/<album_artist>/<album>/<artist> — <track>.mp3
-    out_dir = os.path.join(MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"]))
+    out_dir = os.path.join(
+        MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"])
+    )
     os.makedirs(out_dir, exist_ok=True)
     safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"
     final_path = os.path.join(out_dir, safe_file_name)
@@ -515,6 +553,7 @@ def process_sc_entry(raw: dict, MUSIC_LIBRARY_PATH: str, track_number: int | Non
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     import argparse
 
@@ -530,10 +569,10 @@ def main() -> None:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("urls", nargs="*",
-                        help="One or more YouTube or SoundCloud URLs.")
-    parser.add_argument("--sc", action="store_true",
-                        help="SoundCloud direct mode.")
+    parser.add_argument(
+        "urls", nargs="*", help="One or more YouTube or SoundCloud URLs."
+    )
+    parser.add_argument("--sc", action="store_true", help="SoundCloud direct mode.")
 
     og = parser.add_argument_group(
         "metadata overrides (--sc mode only)",
@@ -541,13 +580,18 @@ def main() -> None:
         "When any override is given, --artist, --album, and --year are required.\n"
         "--track is also required for single tracks.",
     )
-    og.add_argument("--artist",       metavar="ARTIST",
-                    help="Artist name (comma-separated for multiple)")
-    og.add_argument("--album-artist", metavar="ALBUM_ARTIST", dest="album_artist",
-                    help="Album artist (defaults to first value in --artist)")
-    og.add_argument("--album",        metavar="ALBUM",  help="Album name")
-    og.add_argument("--track",        metavar="TRACK",  help="Track title (single tracks only)")
-    og.add_argument("--year",         metavar="YEAR",   help="Release year")
+    og.add_argument(
+        "--artist", metavar="ARTIST", help="Artist name (comma-separated for multiple)"
+    )
+    og.add_argument(
+        "--album-artist",
+        metavar="ALBUM_ARTIST",
+        dest="album_artist",
+        help="Album artist (defaults to first value in --artist)",
+    )
+    og.add_argument("--album", metavar="ALBUM", help="Album name")
+    og.add_argument("--track", metavar="TRACK", help="Track title (single tracks only)")
+    og.add_argument("--year", metavar="YEAR", help="Release year")
 
     args = parser.parse_args()
 
@@ -559,11 +603,11 @@ def main() -> None:
     os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 
     overrides = {
-        "artist":       args.artist,
+        "artist": args.artist,
         "album_artist": args.album_artist,
-        "album":        args.album,
-        "track":        args.track,
-        "year":         args.year,
+        "album": args.album,
+        "track": args.track,
+        "year": args.year,
     }
     has_overrides = any(v is not None for v in overrides.values())
 
@@ -574,7 +618,7 @@ def main() -> None:
             if len(args.urls) > 1:
                 log(f"\n══ SC source [{url_idx}/{len(args.urls)}]: {sc_url}")
 
-            entries     = fetch_sc_entries(sc_url)
+            entries = fetch_sc_entries(sc_url)
             is_playlist = len(entries) > 1
 
             if has_overrides:
@@ -585,7 +629,8 @@ def main() -> None:
                     log(f"\n[{i}/{len(entries)}]")
                 track_number = i if is_playlist else None
                 process_sc_entry(
-                    raw, MUSIC_LIBRARY_PATH,
+                    raw,
+                    MUSIC_LIBRARY_PATH,
                     track_number=track_number,
                     overrides=overrides if has_overrides else None,
                 )
@@ -596,11 +641,13 @@ def main() -> None:
 
     # Metadata overrides only apply to --sc mode
     if has_overrides:
-        die("Metadata override flags (--artist, --album, etc.) are only supported with --sc.")
+        die(
+            "Metadata override flags (--artist, --album, etc.) are only supported with --sc."
+        )
 
     # -- YouTube mode --
     skipped_tracks: list[str] = []
-    total_entries  = 0
+    total_entries = 0
 
     for url_idx, yt_url in enumerate(args.urls, 1):
         if len(args.urls) > 1:
@@ -611,7 +658,9 @@ def main() -> None:
         for i, raw in enumerate(entries, 1):
             log(f"\n[{i}/{len(entries)}]")
             track_number = i if is_playlist else None
-            skipped = process_entry(raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number)
+            skipped = process_entry(
+                raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number
+            )
             if skipped:
                 skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
 

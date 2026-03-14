@@ -27,7 +27,9 @@ async def main() -> None:
         logger.info("Using local Bot API server: %s", bot_api_url)
         session = AiohttpSession(api=TelegramAPIServer.from_base(bot_api_url))
     else:
-        logger.warning("BOT_API_URL is not set — using official Telegram API (20 MB file limit)")
+        logger.warning(
+            "BOT_API_URL is not set — using official Telegram API (20 MB file limit)"
+        )
         session = None
 
     bot = Bot(token=os.environ["BOT_TOKEN"], session=session)

@@ -1,7 +1,5 @@
 import os
 import re
-import sys
-import tempfile
 import urllib.request
 
 from .utils import log, die, run
@@ -10,6 +8,7 @@ from .utils import log, die, run
 # ---------------------------------------------------------------------------
 # Cover art
 # ---------------------------------------------------------------------------
+
 
 def fetch_cover_art(track_info: dict) -> bytes | None:
     """Download the highest-quality cover art from a yt-dlp info dict."""
@@ -43,12 +42,10 @@ def fetch_cover_art(track_info: dict) -> bytes | None:
 # Download
 # ---------------------------------------------------------------------------
 
+
 def _track_url(track: dict) -> str:
     return (
-        track.get("webpage_url")
-        or track.get("url")
-        or track.get("permalink_url")
-        or ""
+        track.get("webpage_url") or track.get("url") or track.get("permalink_url") or ""
     )
 
 
@@ -63,18 +60,24 @@ def download_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
 
     log(f"Downloading: {url}")
     output_tmpl = os.path.join(MUSIC_LIBRARY_PATH, "%(id)s.%(ext)s")
-    result = run([
-        "yt-dlp",
-        "--no-playlist",
-        "--format",        "bestaudio/best",
-        "--extract-audio",
-        "--audio-format",  "mp3",
-        "--audio-quality", "0",
-        "--no-embed-metadata",
-        "--no-embed-thumbnail",
-        "--output",        output_tmpl,
-        url,
-    ])
+    result = run(
+        [
+            "yt-dlp",
+            "--no-playlist",
+            "--format",
+            "bestaudio/best",
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "0",
+            "--no-embed-metadata",
+            "--no-embed-thumbnail",
+            "--output",
+            output_tmpl,
+            url,
+        ]
+    )
     if result.returncode != 0:
         die(f"yt-dlp download failed:\n{result.stderr}")
 
@@ -89,12 +92,21 @@ def download_track(track: dict, MUSIC_LIBRARY_PATH: str) -> str:
 # Tag embedding
 # ---------------------------------------------------------------------------
 
+
 def embed_metadata(mp3_path: str, meta: dict, cover_art: bytes | None) -> None:
     """Write ID3v2.3 tags (and optional cover art) into an MP3 file."""
     try:
         from mutagen.id3 import (
-            ID3, ID3NoHeaderError,
-            TPE1, TPE2, TALB, TIT2, TDRC, TCON, TRCK, APIC,
+            ID3,
+            ID3NoHeaderError,
+            TPE1,
+            TPE2,
+            TALB,
+            TIT2,
+            TDRC,
+            TCON,
+            TRCK,
+            APIC,
         )
     except ImportError:
         die("mutagen is not installed.  Run: pip install mutagen")

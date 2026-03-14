@@ -41,9 +41,9 @@ MUSIC_LIBRARY_PATH = os.environ.get("MUSIC_LIBRARY_PATH", "output")
 
 SHARED_FIELDS = ("artist", "album_artist", "album")
 SHARED_PROMPTS = {
-    "artist":       "✏️ Enter the <b>artist</b> name:",
+    "artist": "✏️ Enter the <b>artist</b> name:",
     "album_artist": "✏️ Enter the <b>album artist</b> name:",
-    "album":        "✏️ Enter the <b>album</b> name:",
+    "album": "✏️ Enter the <b>album</b> name:",
 }
 
 
@@ -51,16 +51,18 @@ SHARED_PROMPTS = {
 # States
 # ---------------------------------------------------------------------------
 
+
 class AlbumStates(StatesGroup):
-    collecting_files   = State()
-    fixing_shared      = State()
+    collecting_files = State()
+    fixing_shared = State()
     fixing_track_title = State()
-    processing         = State()
+    processing = State()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _download_file(bot: Bot, file_id: str, dest_path: str) -> None:
     file = await bot.get_file(file_id)
@@ -101,13 +103,13 @@ def _read_id3(path: str) -> dict:
             pass
 
     return dict(
-        title        = _text("TIT2"),
-        artist       = _text("TPE1"),
-        album_artist = _text("TPE2"),
-        album        = _text("TALB"),
-        release_year = _text("TDRC"),
-        track_number = track_number,
-        cover_art    = cover_art,
+        title=_text("TIT2"),
+        artist=_text("TPE1"),
+        album_artist=_text("TPE2"),
+        album=_text("TALB"),
+        release_year=_text("TDRC"),
+        track_number=track_number,
+        cover_art=cover_art,
     )
 
 
@@ -136,6 +138,7 @@ def _next_title_missing(tracks: list[dict]) -> Optional[int]:
 # Step 1 — start collecting
 # ---------------------------------------------------------------------------
 
+
 @router.message(F.text == "Add Album 🎶")
 async def start_album(message: Message, state: FSMContext) -> None:
     await state.set_state(AlbumStates.collecting_files)
@@ -152,22 +155,25 @@ async def start_album(message: Message, state: FSMContext) -> None:
 # Step 2 — collect file references (no download yet)
 # ---------------------------------------------------------------------------
 
+
 @router.message(AlbumStates.collecting_files, F.content_type == ContentType.AUDIO)
 async def collect_file(message: Message, state: FSMContext, bot: Bot) -> None:
-    audio  = message.audio
+    audio = message.audio
     print(audio)
-    data   = await state.get_data()
+    data = await state.get_data()
     tracks: list[dict] = data.get("tracks", [])
 
-    tracks.append({
-        "file_id":           audio.file_id,
-        "file_name":         audio.file_name or f"track_{len(tracks) + 1}.mp3",
-        "message_id":        message.message_id,
-        # Telegram-visible fields — may be empty; full tags come after download
-        "tg_title":          audio.title or "",
-        "tg_performer":      audio.performer or "",
-        "tg_thumbnail_id":   audio.thumbnail.file_id if audio.thumbnail else None,
-    })
+    tracks.append(
+        {
+            "file_id": audio.file_id,
+            "file_name": audio.file_name or f"track_{len(tracks) + 1}.mp3",
+            "message_id": message.message_id,
+            # Telegram-visible fields — may be empty; full tags come after download
+            "tg_title": audio.title or "",
+            "tg_performer": audio.performer or "",
+            "tg_thumbnail_id": audio.thumbnail.file_id if audio.thumbnail else None,
+        }
+    )
 
     logger.info(
         "Collected audio [%d]: file_name=%r tg_title=%r tg_performer=%r "
@@ -185,9 +191,10 @@ async def collect_file(message: Message, state: FSMContext, bot: Bot) -> None:
 # Step 3 — download all files and read full ID3 tags
 # ---------------------------------------------------------------------------
 
+
 @router.message(AlbumStates.collecting_files, F.text == BTN_ALBUM_DONE)
 async def album_ready(message: Message, state: FSMContext, bot: Bot) -> None:
-    data   = await state.get_data()
+    data = await state.get_data()
     tracks: list[dict] = data.get("tracks", [])
 
     if not tracks:
@@ -204,7 +211,7 @@ async def album_ready(message: Message, state: FSMContext, bot: Bot) -> None:
     shared: dict = {}
 
     for i, t in enumerate(tracks, 1):
-        ext        = os.path.splitext(t["file_name"])[1] or ".mp3"
+        ext = os.path.splitext(t["file_name"])[1] or ".mp3"
         local_path = os.path.join(tmpdir, f"{i:02d}{ext}")
 
         try:
@@ -231,24 +238,26 @@ async def album_ready(message: Message, state: FSMContext, bot: Bot) -> None:
             f"{len(id3['cover_art'])} bytes" if id3.get("cover_art") else "None",
         )
 
-        enriched.append({
-            **t,
-            "local_path":   local_path,
-            "title":        id3.get("title") or t["tg_title"],
-            "track_number": id3.get("track_number") or i,
-            "release_year": id3.get("release_year") or "",
-        })
+        enriched.append(
+            {
+                **t,
+                "local_path": local_path,
+                "title": id3.get("title") or t["tg_title"],
+                "track_number": id3.get("track_number") or i,
+                "release_year": id3.get("release_year") or "",
+            }
+        )
 
         # Initialise shared fields from the first track
         if i == 1:
-            artist       = id3.get("artist") or t["tg_performer"]
+            artist = id3.get("artist") or t["tg_performer"]
             album_artist = id3.get("album_artist") or artist
-            cover_art    = id3.get("cover_art")
+            cover_art = id3.get("cover_art")
             shared = {
-                "artist":        artist,
-                "album_artist":  album_artist,
-                "album":         id3.get("album") or "",
-                "release_year":  id3.get("release_year") or "",
+                "artist": artist,
+                "album_artist": album_artist,
+                "album": id3.get("album") or "",
+                "release_year": id3.get("release_year") or "",
                 "cover_art_path": _save_cover(cover_art, tmpdir) if cover_art else None,
             }
             logger.info(
@@ -270,10 +279,11 @@ async def album_ready(message: Message, state: FSMContext, bot: Bot) -> None:
 # Step 4 — fix shared fields (artist / album_artist / album / cover_art)
 # ---------------------------------------------------------------------------
 
+
 async def _ask_next_shared(message: Message, state: FSMContext) -> None:
-    data   = await state.get_data()
+    data = await state.get_data()
     shared = data.get("shared", {})
-    nxt    = _next_missing_shared(shared)
+    nxt = _next_missing_shared(shared)
 
     if nxt:
         await state.set_state(AlbumStates.fixing_shared)
@@ -295,8 +305,8 @@ async def _ask_next_shared(message: Message, state: FSMContext) -> None:
 
 @router.message(AlbumStates.fixing_shared, F.text)
 async def receive_shared_text(message: Message, state: FSMContext) -> None:
-    data   = await state.get_data()
-    field  = data.get("_fixing_shared_field")
+    data = await state.get_data()
+    field = data.get("_fixing_shared_field")
     shared = dict(data.get("shared", {}))
 
     if field == "cover_art":
@@ -318,7 +328,7 @@ async def receive_shared_cover(message: Message, state: FSMContext, bot: Bot) ->
     if data.get("_fixing_shared_field") != "cover_art":
         return
 
-    tmpdir  = data.get("tmpdir", tempfile.gettempdir())
+    tmpdir = data.get("tmpdir", tempfile.gettempdir())
     file_id = message.photo[-1].file_id if message.photo else message.document.file_id
 
     try:
@@ -340,10 +350,11 @@ async def receive_shared_cover(message: Message, state: FSMContext, bot: Bot) ->
 # Step 5 — fix per-track titles
 # ---------------------------------------------------------------------------
 
+
 async def _ask_next_title(message: Message, state: FSMContext) -> None:
-    data   = await state.get_data()
+    data = await state.get_data()
     tracks = data.get("tracks", [])
-    idx    = _next_title_missing(tracks)
+    idx = _next_title_missing(tracks)
 
     if idx is not None:
         await state.set_state(AlbumStates.fixing_track_title)
@@ -361,8 +372,8 @@ async def _ask_next_title(message: Message, state: FSMContext) -> None:
 
 @router.message(AlbumStates.fixing_track_title, F.text)
 async def receive_track_title(message: Message, state: FSMContext) -> None:
-    data   = await state.get_data()
-    idx    = data.get("_fixing_title_idx", 0)
+    data = await state.get_data()
+    idx = data.get("_fixing_title_idx", 0)
     tracks = [dict(t) for t in data.get("tracks", [])]
     tracks[idx]["title"] = message.text.strip()
     await state.update_data(tracks=tracks)
@@ -373,9 +384,10 @@ async def receive_track_title(message: Message, state: FSMContext) -> None:
 # Step 6 — embed metadata and save files
 # ---------------------------------------------------------------------------
 
+
 async def _process_album(message: Message, state: FSMContext) -> None:
     await state.set_state(AlbumStates.processing)
-    data   = await state.get_data()
+    data = await state.get_data()
     tracks = data.get("tracks", [])
     shared = data.get("shared", {})
     tmpdir = data.get("tmpdir", "")
@@ -397,16 +409,18 @@ async def _process_album(message: Message, state: FSMContext) -> None:
     for i, t in enumerate(tracks, 1):
         track_num = t.get("track_number") or i
         meta = {
-            "artist":       shared["artist"],
+            "artist": shared["artist"],
             "album_artist": shared["album_artist"],
-            "album":        shared["album"],
-            "track":        t["title"],
+            "album": shared["album"],
+            "track": t["title"],
             "track_number": track_num,
-            "release_year": t.get("release_year") or shared.get("release_year") or "0000",
-            "tags":         [],
+            "release_year": t.get("release_year")
+            or shared.get("release_year")
+            or "0000",
+            "tags": [],
         }
         filename = safe_name(f"{track_num:02d} {t['title']}") + ".mp3"
-        dest     = os.path.join(out_dir, filename)
+        dest = os.path.join(out_dir, filename)
         try:
             embed_metadata(t["local_path"], meta, cover_art)
             shutil.move(t["local_path"], dest)

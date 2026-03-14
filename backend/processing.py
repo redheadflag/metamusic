@@ -25,7 +25,7 @@ def _normalize_artists(artist: str, title: str) -> tuple[str, str]:
     if len(parts) <= 1:
         return artist, title
 
-    main      = parts[0]
+    main = parts[0]
     featuring = parts[1:]
 
     already_present = any(f.lower() in title.lower() for f in featuring)
@@ -39,6 +39,7 @@ def _normalize_artists(artist: str, title: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Read tags from an uploaded file (any format mutagen supports)
 # ---------------------------------------------------------------------------
+
 
 def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
     try:
@@ -68,10 +69,10 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         return str(val[0]).strip() if val else ""
 
     if is_id3:
-        title        = _id3("TIT2")
-        artist       = _id3("TPE1")
+        title = _id3("TIT2")
+        artist = _id3("TPE1")
         album_artist = _id3("TPE2")
-        album        = _id3("TALB")
+        album = _id3("TALB")
         release_year = _id3("TDRC")
 
         track_number = index
@@ -89,10 +90,12 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
 
     else:
         # Vorbis comment (FLAC, OGG, Opus…)
-        title        = _vorbis("title")
-        artist       = ", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()) or ""
+        title = _vorbis("title")
+        artist = (
+            ", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()) or ""
+        )
         album_artist = _vorbis("albumartist")
-        album        = _vorbis("album")
+        album = _vorbis("album")
         release_year = _vorbis("date")
 
         track_number = index
@@ -140,18 +143,28 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
 # Embed tags and save to MUSIC_LIBRARY_PATH
 # ---------------------------------------------------------------------------
 
+
 def _source_bitrate(path: str) -> int:
     """Return audio bitrate in kbps using ffprobe, or 0 on failure."""
-    import subprocess, json
+    import subprocess
+    import json
+
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "quiet",
-                "-print_format", "json",
-                "-show_streams", "-select_streams", "a:0",
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-select_streams",
+                "a:0",
                 path,
             ],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         streams = json.loads(result.stdout).get("streams", [])
         if streams:
@@ -167,10 +180,11 @@ def _to_mp3(src: str, dest: str, meta: dict, cover_bytes: Optional[bytes]) -> No
     If the source is already MP3 at ≤256 kbps the audio stream is copied
     without re-encoding to avoid generation loss.
     """
-    import subprocess, tempfile
+    import subprocess
+    import tempfile
 
-    src_kbps  = _source_bitrate(src)
-    is_mp3    = src.lower().endswith(".mp3")
+    src_kbps = _source_bitrate(src)
+    is_mp3 = src.lower().endswith(".mp3")
     target_br = min(src_kbps, 256) if src_kbps > 0 else 256
 
     # Stream-copy only when already MP3 and within limit
@@ -187,29 +201,46 @@ def _to_mp3(src: str, dest: str, meta: dict, cover_bytes: Optional[bytes]) -> No
             tmp.write(cover_bytes)
             cover_path = tmp.name
         cmd += ["-i", cover_path]
-        map_opts   = ["-map", "0:a", "-map", "1:v"]
+        map_opts = ["-map", "0:a", "-map", "1:v"]
         cover_opts = ["-c:v", "mjpeg", "-disposition:v", "attached_pic"]
     else:
         cover_path = None
-        map_opts   = ["-map", "0:a"]
+        map_opts = ["-map", "0:a"]
         cover_opts = []
 
-    cmd += map_opts + audio_opts + cover_opts + [
-        "-id3v2_version", "3",
-        "-metadata", f"title={meta['title']}",
-        "-metadata", f"artist={meta['artist']}",
-        "-metadata", f"album_artist={meta['album_artist']}",
-        "-metadata", f"album={meta['album']}",
-        "-metadata", f"date={meta['release_year']}",
-        *([] if meta['track_number'] is None else ["-metadata", f"track={meta['track_number']}"]),
-        dest,
-    ]
+    cmd += (
+        map_opts
+        + audio_opts
+        + cover_opts
+        + [
+            "-id3v2_version",
+            "3",
+            "-metadata",
+            f"title={meta['title']}",
+            "-metadata",
+            f"artist={meta['artist']}",
+            "-metadata",
+            f"album_artist={meta['album_artist']}",
+            "-metadata",
+            f"album={meta['album']}",
+            "-metadata",
+            f"date={meta['release_year']}",
+            *(
+                []
+                if meta["track_number"] is None
+                else ["-metadata", f"track={meta['track_number']}"]
+            ),
+            dest,
+        ]
+    )
 
     logger.info(
         "ffmpeg: %s → %s (%s, %d kbps → %d kbps)",
-        os.path.basename(src), os.path.basename(dest),
+        os.path.basename(src),
+        os.path.basename(dest),
         "copy" if is_mp3 and src_kbps <= 256 else "encode",
-        src_kbps, target_br,
+        src_kbps,
+        target_br,
     )
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -241,10 +272,10 @@ def process_album(req: ProcessRequest) -> list[str]:
         album = req.album
 
         meta = {
-            "title":        t.title,
-            "artist":       req.artist,
+            "title": t.title,
+            "artist": req.artist,
             "album_artist": req.album_artist,
-            "album":        album,
+            "album": album,
             "release_year": req.release_year,
             "track_number": None if is_single else t.track_number,
         }
@@ -256,8 +287,12 @@ def process_album(req: ProcessRequest) -> list[str]:
         )
         os.makedirs(out_dir, exist_ok=True)
 
-        fname = _safe(t.title) + ".mp3"  if is_single else _safe(f"{t.track_number:02d} {t.title}") + ".mp3"
-        dest  = os.path.join(out_dir, fname)
+        fname = (
+            _safe(t.title) + ".mp3"
+            if is_single
+            else _safe(f"{t.track_number:02d} {t.title}") + ".mp3"
+        )
+        dest = os.path.join(out_dir, fname)
 
         _to_mp3(t.temp_path, dest, meta, art)
         os.unlink(t.temp_path)

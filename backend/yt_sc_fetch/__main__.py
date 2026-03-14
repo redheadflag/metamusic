@@ -23,8 +23,8 @@ import argparse
 import os
 import sys
 
-from .sc      import fetch_sc_entries, process_sc_entry, validate_sc_overrides
-from .utils   import log, die
+from .sc import fetch_sc_entries, process_sc_entry, validate_sc_overrides
+from .utils import log, die
 from .youtube import fetch_yt_entries, process_yt_entry
 
 
@@ -38,16 +38,18 @@ def main() -> None:
             "  %(prog)s --sc <sc_url> [<sc_url> ...]\n"
             "  %(prog)s --sc <sc_url> --artist 'Drake' --album 'Scorpion' --year 2018\n"
             "  %(prog)s --sc <sc_url> --artist 'Drake' --album 'Scorpion' "
-            "--year 2018 --track \"God's Plan\""
+            '--year 2018 --track "God\'s Plan"'
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "urls", nargs="*",
+        "urls",
+        nargs="*",
         help="One or more YouTube or SoundCloud URLs.",
     )
     parser.add_argument(
-        "--sc", action="store_true",
+        "--sc",
+        action="store_true",
         help="SoundCloud direct mode.",
     )
 
@@ -57,13 +59,18 @@ def main() -> None:
         "When any override is given, --artist, --album, and --year are required.\n"
         "--track is also required for single tracks.",
     )
-    og.add_argument("--artist",       metavar="ARTIST",
-                    help="Artist name (comma-separated for multiple)")
-    og.add_argument("--album-artist", metavar="ALBUM_ARTIST", dest="album_artist",
-                    help="Album artist (defaults to first value in --artist)")
-    og.add_argument("--album",  metavar="ALBUM", help="Album name")
-    og.add_argument("--track",  metavar="TRACK", help="Track title (single tracks only)")
-    og.add_argument("--year",   metavar="YEAR",  help="Release year")
+    og.add_argument(
+        "--artist", metavar="ARTIST", help="Artist name (comma-separated for multiple)"
+    )
+    og.add_argument(
+        "--album-artist",
+        metavar="ALBUM_ARTIST",
+        dest="album_artist",
+        help="Album artist (defaults to first value in --artist)",
+    )
+    og.add_argument("--album", metavar="ALBUM", help="Album name")
+    og.add_argument("--track", metavar="TRACK", help="Track title (single tracks only)")
+    og.add_argument("--year", metavar="YEAR", help="Release year")
 
     args = parser.parse_args()
 
@@ -75,11 +82,11 @@ def main() -> None:
     os.makedirs(MUSIC_LIBRARY_PATH, exist_ok=True)
 
     overrides = {
-        "artist":       args.artist,
+        "artist": args.artist,
         "album_artist": args.album_artist,
-        "album":        args.album,
-        "track":        args.track,
-        "year":         args.year,
+        "album": args.album,
+        "track": args.track,
+        "year": args.year,
     }
     has_overrides = any(v is not None for v in overrides.values())
 
@@ -90,7 +97,7 @@ def main() -> None:
             if len(args.urls) > 1:
                 log(f"\n══ SC source [{url_idx}/{len(args.urls)}]: {sc_url}")
 
-            entries     = fetch_sc_entries(sc_url)
+            entries = fetch_sc_entries(sc_url)
             is_playlist = len(entries) > 1
 
             if has_overrides:
@@ -101,7 +108,8 @@ def main() -> None:
                     log(f"\n[{i}/{len(entries)}]")
                 track_number = i if is_playlist else None
                 process_sc_entry(
-                    raw, MUSIC_LIBRARY_PATH,
+                    raw,
+                    MUSIC_LIBRARY_PATH,
                     track_number=track_number,
                     overrides=overrides if has_overrides else None,
                 )
@@ -112,7 +120,9 @@ def main() -> None:
 
     # Metadata overrides only apply to --sc mode
     if has_overrides:
-        die("Metadata override flags (--artist, --album, etc.) are only supported with --sc.")
+        die(
+            "Metadata override flags (--artist, --album, etc.) are only supported with --sc."
+        )
 
     # ── YouTube mode ─────────────────────────────────────────────────────────
     skipped_tracks: list[str] = []
@@ -127,7 +137,9 @@ def main() -> None:
         for i, raw in enumerate(entries, 1):
             log(f"\n[{i}/{len(entries)}]")
             track_number = i if is_playlist else None
-            skipped = process_yt_entry(raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number)
+            skipped = process_yt_entry(
+                raw, MUSIC_LIBRARY_PATH=MUSIC_LIBRARY_PATH, track_number=track_number
+            )
             if skipped:
                 skipped_tracks.append(f"  {len(skipped_tracks) + 1}. {skipped}")
 

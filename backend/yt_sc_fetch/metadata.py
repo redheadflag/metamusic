@@ -2,8 +2,6 @@ import re
 from .utils import die
 
 
-
-
 def _normalize(s: str) -> str:
     """Lowercase and strip typographic quotes/apostrophes for fuzzy comparison."""
     return s.lower().translate(
@@ -14,6 +12,7 @@ def _normalize(s: str) -> str:
 # ---------------------------------------------------------------------------
 # YouTube metadata
 # ---------------------------------------------------------------------------
+
 
 def parse_yt_metadata(raw: dict, track_number: int | None = None) -> dict:
     """Extract and normalise metadata from a raw yt-dlp YouTube info dict."""
@@ -27,13 +26,9 @@ def parse_yt_metadata(raw: dict, track_number: int | None = None) -> dict:
         m = re.split(r"\s*[—–-]\s*", track, maxsplit=1)
         if len(m) == 2:
             artist = m[0].strip()
-            track  = m[1].strip()
+            track = m[1].strip()
         else:
-            artist = (
-                raw.get("uploader")
-                or raw.get("channel")
-                or "Unknown Artist"
-            )
+            artist = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
 
     # Album artist = first artist when there are multiple (e.g. "A, B, C")
     album_artist = artist.split(",")[0].strip()
@@ -41,27 +36,25 @@ def parse_yt_metadata(raw: dict, track_number: int | None = None) -> dict:
     # Build feat. suffix when there are multiple artists
     if album_artist.lower() != artist.lower():
         all_artists = [a.strip() for a in re.split(r"[,&]", artist)]
-        featuring   = [a for a in all_artists if a.lower() != album_artist.lower() and a]
+        featuring = [a for a in all_artists if a.lower() != album_artist.lower() and a]
 
         if featuring:
             feat_str = f"(feat. {', '.join(featuring)})"
-            already_present = any(
-                a.lower() in track.lower() for a in featuring
-            )
+            already_present = any(a.lower() in track.lower() for a in featuring)
             if not already_present:
                 track = f"{track} {feat_str}"
 
     # artist always matches album_artist
     artist = album_artist
-    album  = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
+    album = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
 
     release_year = (
         raw.get("release_year")
         or str(raw.get("release_date", ""))[:4]
-        or str(raw.get("upload_date",  ""))[:4]
+        or str(raw.get("upload_date", ""))[:4]
         or "0000"
     )
-    tags     = raw.get("tags") or []
+    tags = raw.get("tags") or []
     duration = int(raw.get("duration") or 0)
 
     return dict(
@@ -80,19 +73,20 @@ def parse_yt_metadata(raw: dict, track_number: int | None = None) -> dict:
 # SoundCloud metadata
 # ---------------------------------------------------------------------------
 
+
 def parse_sc_metadata(raw: dict, track_number: int | None = None) -> dict:
     """Extract and normalise metadata from a raw yt-dlp SoundCloud info dict."""
-    artist       = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
+    artist = raw.get("uploader") or raw.get("channel") or "Unknown Artist"
     album_artist = artist.split(",")[0].strip()
-    artist       = album_artist   # always matches album_artist
-    track        = raw.get("title") or "Unknown Track"
-    album        = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
+    artist = album_artist  # always matches album_artist
+    track = raw.get("title") or "Unknown Track"
+    album = raw.get("album") or raw.get("playlist_title") or f"{track} (Single)"
     release_year = (
         str(raw.get("release_date", ""))[:4]
-        or str(raw.get("upload_date",  ""))[:4]
+        or str(raw.get("upload_date", ""))[:4]
         or "0000"
     )
-    tags     = raw.get("tags") or []
+    tags = raw.get("tags") or []
     duration = int(raw.get("duration") or 0)
 
     return dict(
@@ -111,18 +105,19 @@ def parse_sc_metadata(raw: dict, track_number: int | None = None) -> dict:
 # Overrides & validation
 # ---------------------------------------------------------------------------
 
+
 def apply_sc_overrides(meta: dict, overrides: dict) -> dict:
     """Merge user-supplied override values into a parsed meta dict."""
     meta = dict(meta)
     if overrides.get("artist"):
-        meta["artist"]       = overrides["artist"]
+        meta["artist"] = overrides["artist"]
         meta["album_artist"] = overrides["artist"].split(",")[0].strip()
     if overrides.get("album_artist"):
         meta["album_artist"] = overrides["album_artist"]
     if overrides.get("album"):
-        meta["album"]        = overrides["album"]
+        meta["album"] = overrides["album"]
     if overrides.get("track"):
-        meta["track"]        = overrides["track"]
+        meta["track"] = overrides["track"]
     if overrides.get("year"):
         meta["release_year"] = overrides["year"]
     return meta
@@ -147,6 +142,7 @@ def validate_sc_overrides(overrides: dict, is_playlist: bool) -> None:
 # ---------------------------------------------------------------------------
 # Display
 # ---------------------------------------------------------------------------
+
 
 def display_metadata(meta: dict) -> None:
     """Pretty-print a metadata dict for the user to review."""

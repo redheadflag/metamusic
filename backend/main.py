@@ -9,14 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from models import ProcessRequest, AlbumMeta, BulkProcessRequest
 from processing import read_tags, process_album
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
 
+
 @asynccontextmanager
 async def lifespan(app):
     from yt_sc_fetch.sc_api import SC_OAUTH_TOKEN
+
     if SC_OAUTH_TOKEN:
         logger.info("SoundCloud credentials loaded")
     else:
@@ -25,6 +29,7 @@ async def lifespan(app):
             "Get them from browser devtools on soundcloud.com."
         )
     yield
+
 
 app = FastAPI(title="metamusic", lifespan=lifespan)
 
@@ -61,14 +66,18 @@ async def upload(files: list[UploadFile]):
             "  track_number = %r\n"
             "  cover_art    = %s\n"
             "  temp_path    = %s",
-            i, len(files), file.filename,
+            i,
+            len(files),
+            file.filename,
             meta.title,
             meta.artist,
             meta.album_artist,
             meta.album,
             meta.release_year,
             meta.track_number,
-            f"{len(meta.cover_art_b64) * 3 // 4} bytes" if meta.cover_art_b64 else "None",
+            f"{len(meta.cover_art_b64) * 3 // 4} bytes"
+            if meta.cover_art_b64
+            else "None",
             meta.temp_path,
         )
         results.append(meta)
@@ -97,11 +106,15 @@ async def process(req: ProcessRequest):
 
     logger.info(
         "Processing %d track(s): artist=%r album=%r year=%r",
-        len(req.tracks), req.artist, req.album, req.release_year,
+        len(req.tracks),
+        req.artist,
+        req.album,
+        req.release_year,
     )
     saved = process_album(req)
     logger.info("Saved: %s", saved)
     return {"saved": saved}
+
 
 @app.post("/api/upload-zip")
 async def upload_zip(files: list[UploadFile]):
@@ -126,10 +139,13 @@ async def upload_zip(files: list[UploadFile]):
         with zipfile.ZipFile(io.BytesIO(content)) as z:
             audio_exts = {".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aiff", ".aif"}
             members = sorted(
-                (m for m in z.namelist()
-                 if not m.startswith("__MACOSX") and
-                    os.path.splitext(m.lower())[1] in audio_exts),
-                key=lambda n: n
+                (
+                    m
+                    for m in z.namelist()
+                    if not m.startswith("__MACOSX")
+                    and os.path.splitext(m.lower())[1] in audio_exts
+                ),
+                key=lambda n: n,
             )
             if not members:
                 raise HTTPException(400, f"No audio files found in '{zf.filename}'")
@@ -137,7 +153,7 @@ async def upload_zip(files: list[UploadFile]):
             extracted = []
             for i, member in enumerate(members, 1):
                 fname = os.path.basename(member)
-                dest  = os.path.join(album_dir, f"{i:02d}_{fname}")
+                dest = os.path.join(album_dir, f"{i:02d}_{fname}")
                 with z.open(member) as src, open(dest, "wb") as dst:
                     dst.write(src.read())
                 extracted.append((i, fname, dest))
@@ -145,20 +161,28 @@ async def upload_zip(files: list[UploadFile]):
         tracks = []
         for i, fname, path in extracted:
             meta = read_tags(path, fname, i)
-            logger.info("zip %r track %d: title=%r artist=%r album=%r",
-                        zf.filename, i, meta.title, meta.artist, meta.album)
+            logger.info(
+                "zip %r track %d: title=%r artist=%r album=%r",
+                zf.filename,
+                i,
+                meta.title,
+                meta.artist,
+                meta.album,
+            )
             tracks.append(meta)
 
         first = tracks[0]
-        albums.append(AlbumMeta(
-            zip_name=zf.filename or "archive.zip",
-            tracks=tracks,
-            artist=first.artist,
-            album_artist=first.album_artist or first.artist,
-            album=first.album,
-            release_year=first.release_year,
-            cover_art_b64=first.cover_art_b64,
-        ))
+        albums.append(
+            AlbumMeta(
+                zip_name=zf.filename or "archive.zip",
+                tracks=tracks,
+                artist=first.artist,
+                album_artist=first.album_artist or first.artist,
+                album=first.album,
+                release_year=first.release_year,
+                cover_art_b64=first.cover_art_b64,
+            )
+        )
 
     return albums
 
@@ -176,8 +200,12 @@ async def process_bulk(req: BulkProcessRequest):
         if not album_req.album:
             raise HTTPException(400, "album is required for each entry")
 
-        logger.info("Bulk processing: artist=%r album=%r tracks=%d",
-                    album_req.artist, album_req.album, len(album_req.tracks))
+        logger.info(
+            "Bulk processing: artist=%r album=%r tracks=%d",
+            album_req.artist,
+            album_req.album,
+            len(album_req.tracks),
+        )
         saved = process_album(album_req)
         all_saved.extend(saved)
 
@@ -223,8 +251,14 @@ async def sc_fetch(body: dict):
 
     results = [TrackMeta(**t) for t in tracks]
     for i, t in enumerate(results, 1):
-        logger.info("SC entry %d: title=%r artist=%r album=%r url=%s",
-                    i, t.title, t.artist, t.album, t.sc_url)
+        logger.info(
+            "SC entry %d: title=%r artist=%r album=%r url=%s",
+            i,
+            t.title,
+            t.artist,
+            t.album,
+            t.sc_url,
+        )
     return results
 
 
@@ -233,8 +267,8 @@ async def sc_process(req: ScProcessRequest):
     """
     Download SoundCloud tracks, convert to MP3, embed confirmed metadata.
     """
-    import base64, tempfile as tf
-    from yt_sc_fetch.audio import fetch_cover_art
+    import base64
+    import tempfile as tf
     from processing import _to_mp3, _safe, MUSIC_LIBRARY_PATH
 
     if not req.tracks:
@@ -260,25 +294,30 @@ async def sc_process(req: ScProcessRequest):
         if not t.sc_url:
             raise HTTPException(400, f"Missing sc_url for track '{t.title}'")
 
-        art = cover_bytes or (base64.b64decode(t.cover_art_b64) if t.cover_art_b64 else None)
+        art = cover_bytes or (
+            base64.b64decode(t.cover_art_b64) if t.cover_art_b64 else None
+        )
 
         track_num = t.track_number
-        album     = req.album
+        album = req.album
 
         meta = {
-            "title":        t.title,
-            "artist":       req.artist,
+            "title": t.title,
+            "artist": req.artist,
             "album_artist": req.album_artist,
-            "album":        album,
+            "album": album,
             "release_year": req.release_year,
             "track_number": None if is_single else track_num,
         }
 
-        out_dir = os.path.join(MUSIC_LIBRARY_PATH, _safe(req.album_artist), _safe(album))
+        out_dir = os.path.join(
+            MUSIC_LIBRARY_PATH, _safe(req.album_artist), _safe(album)
+        )
         os.makedirs(out_dir, exist_ok=True)
 
         fname = (
-            _safe(t.title) + ".mp3" if is_single
+            _safe(t.title) + ".mp3"
+            if is_single
             else _safe(f"{track_num:02d} {t.title}") + ".mp3"
         )
         dest = os.path.join(out_dir, fname)
@@ -287,19 +326,36 @@ async def sc_process(req: ScProcessRequest):
 
         def _download_and_convert(sc_url, tmp_dir, dest, meta, art):
             from yt_sc_fetch.utils import run as yt_run
+
             output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
-            result = yt_run([
-                "yt-dlp", "--no-playlist",
-                "--format", "bestaudio/best",
-                "--extract-audio", "--audio-format", "mp3",
-                "--audio-quality", "0",
-                "--no-embed-metadata", "--no-embed-thumbnail",
-                "--output", output_tmpl,
-                sc_url,
-            ])
+            result = yt_run(
+                [
+                    "yt-dlp",
+                    "--no-playlist",
+                    "--format",
+                    "bestaudio/best",
+                    "--extract-audio",
+                    "--audio-format",
+                    "mp3",
+                    "--audio-quality",
+                    "0",
+                    "--no-embed-metadata",
+                    "--no-embed-thumbnail",
+                    "--output",
+                    output_tmpl,
+                    sc_url,
+                ]
+            )
             if result.returncode != 0:
                 raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
-            mp3 = next((os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".mp3")), None)
+            mp3 = next(
+                (
+                    os.path.join(tmp_dir, f)
+                    for f in os.listdir(tmp_dir)
+                    if f.endswith(".mp3")
+                ),
+                None,
+            )
             if not mp3:
                 raise RuntimeError("yt-dlp produced no mp3 file")
             _to_mp3(mp3, dest, meta, art)
@@ -307,9 +363,12 @@ async def sc_process(req: ScProcessRequest):
 
         tmp_dir = tf.mkdtemp(prefix="sc_dl_")
         try:
-            await _run_blocking(_download_and_convert, t.sc_url, tmp_dir, dest, meta, art)
+            await _run_blocking(
+                _download_and_convert, t.sc_url, tmp_dir, dest, meta, art
+            )
         finally:
             import shutil
+
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         saved.append(dest)

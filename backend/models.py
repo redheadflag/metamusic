@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class TrackMeta(BaseModel):
-    temp_path: str = ""        # empty for SC tracks (not uploaded yet)
+    temp_path: str = ""  # empty for SC tracks (not uploaded yet)
     file_name: str
     title: str
     artist: str
@@ -26,6 +26,7 @@ class ProcessRequest(BaseModel):
 
 class ScProcessRequest(BaseModel):
     """Process SoundCloud tracks — download + embed metadata."""
+
     tracks: list[TrackMeta]
     artist: str
     album_artist: str
