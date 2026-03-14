@@ -147,7 +147,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
   }
 
   return (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
     {/* Mode toggle — only relevant when a single file is uploaded */}
       {tracks.length === 1 && <SegmentedControl value={mode} onChange={setMode} />}
 
@@ -155,7 +155,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <label style={{ cursor: "pointer", flexShrink: 0 }}>
           <div style={{
-            width: 88, height: 88,
+            width: 140, height: 140,
             borderRadius: "var(--radius)",
             border: "1px solid var(--border)",
             background: "var(--code-bg)",
@@ -171,18 +171,18 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCoverFile} />
         </label>
 
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div style={{ gridColumn: "1 / -1" }}>
-            <Field label="Artist" value={shared.artist} onChange={set("artist")} required />
-          </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+          <Field label="Artist" value={shared.artist} onChange={set("artist")} required />
 
           {isSingle ? (
-            <Field label="Year" value={shared.release_year} onChange={set("release_year")} />
+            <div style={{ width: "50%" }}>
+              <Field label="Year" value={shared.release_year} onChange={set("release_year")} />
+            </div>
           ) : (
-            <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
               <Field label="Album" value={shared.album}        onChange={set("album")}        required />
               <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -268,29 +268,18 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
                   {r.track.file_name}
                 </span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); setRows((rs) => rs.map((row, j) => j === i ? { ...row, showExtra: !row.showExtra } : row)); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete "${r.title || r.track.file_name}"?`))
+                      setRows((rs) => rs.filter((_, j) => j !== i).map((row, j) => ({ ...row, track_number: j + 1 })));
+                  }}
                   draggable={false}
                   onDragStart={(e) => e.stopPropagation()}
-                  style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, opacity: 0.5 }}
+                  style={{ fontSize: 13, padding: "2px 6px", flexShrink: 0, color: "var(--danger)", borderColor: "var(--danger)", opacity: 0.7 }}
                 >
-                  {r.showExtra ? "Less ▴" : "More ▾"}
+                  ✕
                 </button>
               </div>
-              {r.showExtra && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "8px 8px 8px 44px" }}>
-                  <Field label="Composer" value={r.composer} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, composer: v } : row))} />
-                  <Field label="Language" value={r.language} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, language: v } : row))} />
-                  <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Lyrics</label>
-                    <textarea
-                      value={r.lyrics}
-                      onChange={(e) => { const v = e.target.value; setRows((rs) => rs.map((row, j) => j === i ? { ...row, lyrics: v } : row)); }}
-                      rows={4}
-                      style={{ font: "inherit", background: "var(--bg)", color: "var(--text-h)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 10px", resize: "vertical", width: "100%", boxSizing: "border-box" }}
-                    />
-                  </div>
-                </div>
-              )}
             </>
           )
         })}
@@ -303,6 +292,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           Save to library
         </button>
       </div>
-    </>
+    </div>
   );
 }

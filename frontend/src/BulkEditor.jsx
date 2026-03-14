@@ -93,10 +93,10 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
 
       {/* Body */}
       {!collapsed && (
-        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ padding: "20px 20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
 
           {/* Cover + fields */}
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
             <label style={{ cursor: "pointer", flexShrink: 0 }}>
               <div style={{
                 width: 72, height: 72, borderRadius: 8,
@@ -112,7 +112,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
               <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCoverFile} />
             </label>
 
-            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ gridColumn: "1 / -1" }}>
                 <Field label="Artist" value={albumMeta.artist} onChange={set("artist")} required />
               </div>
@@ -122,7 +122,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
           </div>
 
           {/* Track list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{
               fontSize: 11, fontWeight: 600, color: "var(--text)",
               textTransform: "uppercase", letterSpacing: "0.07em",
@@ -130,7 +130,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
               Tracks
             </span>
             {albumMeta.tracks.map((t, i) => (
-              <div key={t.temp_path} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div key={t.temp_path} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <input
                   type="number"
                   min={1}
@@ -198,7 +198,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{
@@ -219,7 +219,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
         <AlbumPanel key={a.zip_name + i} albumMeta={a} index={i} onChange={onChange} onRemove={handleRemove} />
       ))}
 
-      <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+      <div style={{ display: "flex", gap: 10, paddingTop: 8 }}>
         <button onClick={onReset}>← Back</button>
         <button className="primary" disabled={anyInvalid} onClick={confirm} style={{ flex: 1 }}>
           Save all to library
