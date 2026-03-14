@@ -5,6 +5,7 @@ services:
     env_file: .env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
+      HTTPS_PROXY: socks5://host.docker.internal:1080
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
