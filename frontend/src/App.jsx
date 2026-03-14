@@ -78,22 +78,43 @@ export default function App() {
   }
 
   // ── SoundCloud fetch ─────────────────────────────────────────────────────
-  async function handleScFetch(url) {
+  async function handleScFetch(url, type) {
     setState("sc-fetching");
     setError(null);
     try {
-      const res = await fetch(`${API}/sc-fetch`, {
+      const endpoint = type === "artist" ? `${API}/sc-fetch-artist` : `${API}/sc-fetch`;
+      const res = await fetch(endpoint, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ url }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      setTracks(data);
-      setState("editing");
+      if (type === "artist") {
+        setAlbums(data);
+        setState("bulk-editing");
+      } else {
+        setTracks(data);
+        setState("editing");
+      }
     } catch (e) {
-      setState("sc-input");   // stay on SC input so user can correct URL
-      throw e;                // bubble to ScInput for inline error display
+      setState("sc-input");
+      throw e;
+    }
+  }
+
+  // ── Remove album from bulk edit (clean up SC temp paths) ─────────────────
+  async function handleRemoveAlbum(album) {
+    const tempPaths = (album.tracks || []).map((t) => t.temp_path).filter(Boolean);
+    if (tempPaths.length === 0) return;
+    try {
+      await fetch(`${API}/cancel`, {
+        method:  "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ temp_paths: tempPaths }),
+      });
+    } catch (e) {
+      console.warn("Could not clean up temp files:", e);
     }
   }
 
@@ -196,26 +217,18 @@ export default function App() {
       )}
 
       {state === "sc-fetching" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <p style={{ color: "var(--text)", opacity: 0.5 }}>Fetching metadata from SoundCloud…</p>
-          <div><button onClick={() => { setState("sc-input"); }}>← Back</button></div>
-        </div>
+        <p style={{ color: "var(--text)", opacity: 0.5 }}>Fetching metadata from SoundCloud…</p>
       )}
 
       {/* Upload progress */}
-      {state === "uploading" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ProgressBar progress={progress} label="Uploading…" />
-          <div><button onClick={() => { setState("idle"); setMode(mode); setProgress(0); }}>← Back</button></div>
-        </div>
-      )}
+      {state === "uploading" && <ProgressBar progress={progress} label="Uploading…" />}
 
       {/* Editors */}
       {state === "editing" && (
         <MetaEditor tracks={tracks} onConfirm={handleConfirm} onReset={backToMode} />
       )}
       {state === "bulk-editing" && (
-        <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={backToMode} />
+        <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={backToMode} onRemove={handleRemoveAlbum} />
       )}
 
       {state === "saving" && (

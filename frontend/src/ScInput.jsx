@@ -1,17 +1,35 @@
 import { useState } from "react";
 
+const ARTIST_SUFFIXES = /\/(albums|tracks|sets|likes|following|followers|reposts|spotlight)\/?$/;
+
+function detectType(url) {
+  const u = url.replace(ARTIST_SUFFIXES, "");
+  if (/soundcloud\.com\/[^/]+\/sets\//.test(url)) return "playlist";
+  if (ARTIST_SUFFIXES.test(url))                       return "artist";
+  if (/soundcloud\.com\/[^/]+\/[^/]+/.test(u))     return "track";
+  if (/soundcloud\.com\/[^/]+\/?$/.test(u))         return "artist";
+  return null;
+}
+
+const TYPE_LABELS = {
+  track:    "Single track",
+  playlist: "Playlist / album",
+  artist:   "Artist profile — fetches all albums and tracks",
+};
+
 export default function ScInput({ onFetch, onBack }) {
   const [url,     setUrl]     = useState("");
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
 
-  const valid = /soundcloud\.com\/.+/.test(url.trim());
+  const type  = detectType(url.trim());
+  const valid = type !== null;
 
   async function handleFetch() {
     setLoading(true);
     setError(null);
     try {
-      await onFetch(url.trim());
+      await onFetch(url.trim(), type);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -31,19 +49,24 @@ export default function ScInput({ onFetch, onBack }) {
         <input
           type="url"
           value={url}
-          placeholder="https://soundcloud.com/artist/track-or-playlist"
+          placeholder="https://soundcloud.com/artist or /artist/track or /artist/sets/album"
           onChange={(e) => { setUrl(e.target.value); setError(null); }}
           onKeyDown={(e) => e.key === "Enter" && valid && !loading && handleFetch()}
           autoFocus
         />
-        <p style={{ fontSize: 12, color: "var(--text)", opacity: 0.45 }}>
-          Works with tracks, albums, and playlists
-        </p>
+        {type && (
+          <p style={{ fontSize: 12, color: "var(--accent)", opacity: 0.8 }}>
+            {TYPE_LABELS[type]}
+          </p>
+        )}
+        {!type && url && (
+          <p style={{ fontSize: 12, color: "var(--text)", opacity: 0.45 }}>
+            Enter a valid SoundCloud URL
+          </p>
+        )}
       </div>
 
-      {error && (
-        <p style={{ fontSize: 13, color: "var(--danger)" }}>{error}</p>
-      )}
+      {error && <p style={{ fontSize: 13, color: "var(--danger)" }}>{error}</p>}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onBack}>← Back</button>
@@ -53,7 +76,9 @@ export default function ScInput({ onFetch, onBack }) {
           onClick={handleFetch}
           style={{ flex: 1 }}
         >
-          {loading ? "Fetching metadata…" : "Fetch"}
+          {loading
+            ? type === "artist" ? "Fetching artist profile…" : "Fetching metadata…"
+            : "Fetch"}
         </button>
       </div>
     </div>

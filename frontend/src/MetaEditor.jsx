@@ -77,7 +77,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
     album:         first.album,
     release_year:  first.release_year,
     cover_art_b64: first.cover_art_b64 ?? null,
-    publisher:     "",
   });
 
   const [rows, setRows] = useState(() =>
@@ -148,9 +147,8 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-
-      {/* Mode toggle — only relevant when a single file is uploaded */}
+    <>
+    {/* Mode toggle — only relevant when a single file is uploaded */}
       {tracks.length === 1 && <SegmentedControl value={mode} onChange={setMode} />}
 
       {/* Cover + shared fields */}
@@ -186,9 +184,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
               <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
             </>
           )}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <Field label="Publisher" value={shared.publisher} onChange={set("publisher")} />
-          </div>
         </div>
       </div>
 
@@ -217,85 +212,87 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         {rows.map((r, i) => {
           const isOver = overIndex === i && dragIndex.current !== i;
           return (
-            <div
-              key={r.track.temp_path}
-              draggable={!isSingle}
-              onDragStart={() => !isSingle && onDragStart(i)}
-              onDragEnter={() => !isSingle && onDragEnter(i)}
-              onDragOver={(e) => e.preventDefault()}
-              onDragEnd={onDragEnd}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "6px 8px", borderRadius: 7,
-                border: isOver ? "1px solid var(--accent-border)" : "1px solid transparent",
-                background: isOver ? "var(--accent-bg)" : "transparent",
-                transition: "background 0.1s, border-color 0.1s",
-                userSelect: "none",
-              }}
-            >
-              {!isSingle && <DragHandle />}
+            <>
+              <div
+                key={r.track.temp_path}
+                draggable={!isSingle}
+                onDragStart={() => !isSingle && onDragStart(i)}
+                onDragEnter={() => !isSingle && onDragEnter(i)}
+                onDragOver={(e) => e.preventDefault()}
+                onDragEnd={onDragEnd}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "6px 8px", borderRadius: 7,
+                  border: isOver ? "1px solid var(--accent-border)" : "1px solid transparent",
+                  background: isOver ? "var(--accent-bg)" : "transparent",
+                  transition: "background 0.1s, border-color 0.1s",
+                  userSelect: "none",
+                }}
+              >
+                {!isSingle && <DragHandle />}
 
-              {!isSingle && (
+                {!isSingle && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={r.track_number}
+                    draggable={false}
+                    onDragStart={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!isNaN(v) && v > 0)
+                        setRows((rs) => rs.map((row, j) => j === i ? { ...row, track_number: v } : row));
+                    }}
+                    style={{ width: 64, textAlign: "center", flexShrink: 0 }}
+                  />
+                )}
+
                 <input
-                  type="number"
-                  min={1}
-                  value={r.track_number}
+                  value={r.title}
+                  placeholder="Title required"
+                  draggable={false}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setRows((rs) => rs.map((row, j) => j === i ? { ...row, title: v } : row));
+                  }}
+                  onDragStart={(e) => e.stopPropagation()}
+                  style={{ flex: 1, borderColor: !r.title.trim() ? "var(--danger)" : undefined }}
+                />
+
+                <span style={{
+                  fontSize: 11, color: "var(--text)", opacity: 0.35,
+                  whiteSpace: "nowrap", maxWidth: 130,
+                  overflow: "hidden", textOverflow: "ellipsis",
+                  display: "var(--filename-display, inline)",
+                }}>
+                  {r.track.file_name}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setRows((rs) => rs.map((row, j) => j === i ? { ...row, showExtra: !row.showExtra } : row)); }}
                   draggable={false}
                   onDragStart={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!isNaN(v) && v > 0)
-                      setRows((rs) => rs.map((row, j) => j === i ? { ...row, track_number: v } : row));
-                  }}
-                  style={{ width: 64, textAlign: "center", flexShrink: 0 }}
-                />
-              )}
-
-              <input
-                value={r.title}
-                placeholder="Title required"
-                draggable={false}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setRows((rs) => rs.map((row, j) => j === i ? { ...row, title: v } : row));
-                }}
-                onDragStart={(e) => e.stopPropagation()}
-                style={{ flex: 1, borderColor: !r.title.trim() ? "var(--danger)" : undefined }}
-              />
-
-              <span style={{
-                fontSize: 11, color: "var(--text)", opacity: 0.35,
-                whiteSpace: "nowrap", maxWidth: 130,
-                overflow: "hidden", textOverflow: "ellipsis",
-                display: "var(--filename-display, inline)",
-              }}>
-                {r.track.file_name}
-              </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); setRows((rs) => rs.map((row, j) => j === i ? { ...row, showExtra: !row.showExtra } : row)); }}
-                draggable={false}
-                onDragStart={(e) => e.stopPropagation()}
-                style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, opacity: 0.5 }}
-              >
-                {r.showExtra ? "Less ▴" : "More ▾"}
-              </button>
-            </div>
-            {r.showExtra && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "8px 8px 8px 44px" }}>
-                <Field label="Composer" value={r.composer} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, composer: v } : row))} />
-                <Field label="Language" value={r.language} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, language: v } : row))} />
-                <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Lyrics</label>
-                  <textarea
-                    value={r.lyrics}
-                    onChange={(e) => { const v = e.target.value; setRows((rs) => rs.map((row, j) => j === i ? { ...row, lyrics: v } : row)); }}
-                    rows={4}
-                    style={{ font: "inherit", background: "var(--bg)", color: "var(--text-h)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 10px", resize: "vertical", width: "100%", boxSizing: "border-box" }}
-                  />
-                </div>
+                  style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, opacity: 0.5 }}
+                >
+                  {r.showExtra ? "Less ▴" : "More ▾"}
+                </button>
               </div>
-            )}
-          );
+              {r.showExtra && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "8px 8px 8px 44px" }}>
+                  <Field label="Composer" value={r.composer} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, composer: v } : row))} />
+                  <Field label="Language" value={r.language} onChange={(v) => setRows((rs) => rs.map((row, j) => j === i ? { ...row, language: v } : row))} />
+                  <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Lyrics</label>
+                    <textarea
+                      value={r.lyrics}
+                      onChange={(e) => { const v = e.target.value; setRows((rs) => rs.map((row, j) => j === i ? { ...row, lyrics: v } : row)); }}
+                      rows={4}
+                      style={{ font: "inherit", background: "var(--bg)", color: "var(--text-h)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 10px", resize: "vertical", width: "100%", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )
         })}
       </div>
 
@@ -306,7 +303,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           Save to library
         </button>
       </div>
-
-    </div>
+    </>
   );
 }

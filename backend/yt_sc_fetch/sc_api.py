@@ -5,6 +5,7 @@ SoundCloud API v2 client using httpx for better TLS fingerprinting.
 import base64
 import os
 import re
+import json
 import logging
 from typing import Optional
 
@@ -12,10 +13,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SC_API = "https://api-v2.soundcloud.com"
-SC_CLIENT_ID = os.environ.get("SC_CLIENT_ID", "")
+SC_API        = "https://api-v2.soundcloud.com"
+SC_CLIENT_ID  = os.environ.get("SC_CLIENT_ID", "")
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
+HTTPS_PROXY   = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
 
 def _client() -> httpx.Client:
@@ -68,23 +69,35 @@ def _fetch_cover(artwork_url: Optional[str]) -> Optional[bytes]:
         return None
 
 
+_cover_cache: dict[str, Optional[bytes]] = {}
+
+
+def _fetch_cover_cached(artwork_url: Optional[str]) -> Optional[bytes]:
+    if not artwork_url:
+        return None
+    url = re.sub(r"-(large|t500x500|small|badge|tiny|crop)\b", "-t500x500", artwork_url)
+    if url not in _cover_cache:
+        _cover_cache[url] = _fetch_cover(artwork_url)
+    return _cover_cache[url]
+
+
 def _parse_track(raw: dict, index: int, total: int) -> dict:
     pub_meta = raw.get("publisher_metadata") or {}
 
-    title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
+    title  = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
     artist = (
         pub_meta.get("artist")
         or raw.get("user", {}).get("username")
         or "Unknown Artist"
     )
-    album = pub_meta.get("album_title") or ""
+    album        = pub_meta.get("album_title") or ""
     release_year = (raw.get("created_at") or "")[:4]
 
-    artwork_url = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
-    cover_bytes = _fetch_cover(artwork_url)
-    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+    artwork_url  = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
+    cover_bytes  = _fetch_cover_cached(artwork_url)
+    cover_b64    = base64.b64encode(cover_bytes).decode() if cover_bytes else None
 
-    sc_url = raw.get("permalink_url") or ""
+    sc_url       = raw.get("permalink_url") or ""
     track_number = index if total > 1 else None
 
     return dict(
@@ -98,6 +111,38 @@ def _parse_track(raw: dict, index: int, total: int) -> dict:
         sc_url=sc_url,
         file_name=f"{title}.mp3",
         temp_path="",
+    )
+
+
+def _parse_playlist(playlist: dict) -> dict:
+    """Convert a SC API playlist object to an AlbumMeta-like dict."""
+    tracks_raw = playlist.get("tracks") or []
+    full_tracks = []
+    for i, t in enumerate(tracks_raw, 1):
+        if "title" not in t:
+            try:
+                t = _get(f"/tracks/{t['id']}")
+            except Exception as e:
+                logger.warning("Could not fetch track %s: %s", t.get("id"), e)
+                continue
+        full_tracks.append(_parse_track(t, i, len(tracks_raw)))
+
+    if not full_tracks:
+        return {}
+
+    first = full_tracks[0]
+    cover_url = playlist.get("artwork_url") or (tracks_raw[0].get("artwork_url") if tracks_raw else None)
+    cover_bytes = _fetch_cover_cached(cover_url)
+    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else first.get("cover_art_b64")
+
+    return dict(
+        zip_name=playlist.get("permalink_url") or playlist.get("title") or "Unknown",
+        tracks=full_tracks,
+        artist=first["artist"],
+        album_artist=first["artist"],
+        album=playlist.get("title") or first["album"] or "Unknown Album",
+        release_year=first["release_year"],
+        cover_art_b64=cover_b64,
     )
 
 
@@ -127,3 +172,65 @@ def resolve_url(sc_url: str) -> list[dict]:
         return full_tracks
 
     raise ValueError(f"Unsupported SoundCloud resource kind: {kind!r}")
+
+
+def _clean_artist_url(sc_url: str) -> str:
+    """Strip UI-only path suffixes that the API resolve endpoint doesn't understand."""
+    import re
+    return re.sub(r"/(albums|tracks|sets|likes|following|followers|reposts|spotlight)\/?$", "", sc_url.rstrip("/"))
+
+
+def resolve_artist(sc_url: str) -> list[dict]:
+    """
+    Fetch all albums/playlists and loose tracks for a SoundCloud artist URL.
+    Returns a list of AlbumMeta-like dicts (one per playlist + one for loose tracks).
+    """
+    sc_url = _clean_artist_url(sc_url)
+    data = _get("/resolve", {"url": sc_url})
+    kind = data.get("kind")
+    if kind != "user":
+        raise ValueError(f"Expected a user/artist URL, got kind={kind!r}")
+
+    user_id = data["id"]
+    username = data.get("username") or data.get("permalink") or str(user_id)
+    logger.info("Fetching artist profile: %s (id=%s)", username, user_id)
+
+    # Fetch all playlists (albums + sets)
+    playlists_data = _get(f"/users/{user_id}/playlists", {"limit": 50, "representation": "full"})
+    playlists = playlists_data if isinstance(playlists_data, list) else playlists_data.get("collection", [])
+    logger.info("Found %d playlists for %s", len(playlists), username)
+
+    albums = []
+    playlist_track_ids: set[int] = set()
+
+    for pl in playlists:
+        album = _parse_playlist(pl)
+        if album:
+            albums.append(album)
+            for t in pl.get("tracks") or []:
+                playlist_track_ids.add(t.get("id"))
+
+    # Fetch loose tracks (not in any playlist) — may 403 on private profiles
+    loose = []
+    try:
+        tracks_data = _get(f"/users/{user_id}/tracks", {"limit": 50})
+        all_tracks = tracks_data if isinstance(tracks_data, list) else tracks_data.get("collection", [])
+        loose = [t for t in all_tracks if t.get("id") not in playlist_track_ids]
+        logger.info("Found %d loose tracks for %s", len(loose), username)
+    except Exception as e:
+        logger.warning("Could not fetch loose tracks for %s (skipping): %s", username, e)
+
+    if loose:
+        parsed = [_parse_track(t, i + 1, len(loose)) for i, t in enumerate(loose)]
+        first = parsed[0]
+        albums.append(dict(
+            zip_name=f"{username} — loose tracks",
+            tracks=parsed,
+            artist=first["artist"],
+            album_artist=first["artist"],
+            album="",   # user will fill in
+            release_year=first["release_year"],
+            cover_art_b64=first.get("cover_art_b64"),
+        ))
+
+    return albums

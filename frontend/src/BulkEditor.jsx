@@ -13,7 +13,7 @@ const Field = ({ label, value, onChange, required }) => (
   </div>
 );
 
-function AlbumPanel({ albumMeta, index, onChange }) {
+function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
   const [collapsed, setCollapsed] = useState(false);
 
   const set = (key) => (v) => {
@@ -78,9 +78,17 @@ function AlbumPanel({ albumMeta, index, onChange }) {
             </div>
           </div>
         </div>
-        <span style={{ fontSize: 12, color: "var(--text)", opacity: 0.4 }}>
-          {collapsed ? "▶" : "▼"}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(index); }}
+            style={{ fontSize: 11, padding: "2px 8px", color: "var(--danger)", borderColor: "var(--danger)", opacity: 0.7 }}
+          >
+            Remove
+          </button>
+          <span style={{ fontSize: 12, color: "var(--text)", opacity: 0.4 }}>
+            {collapsed ? "▶" : "▼"}
+          </span>
+        </div>
       </div>
 
       {/* Body */}
@@ -160,11 +168,17 @@ function AlbumPanel({ albumMeta, index, onChange }) {
   );
 }
 
-export default function BulkEditor({ albums: initial, onConfirm, onReset }) {
+export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemove }) {
   const [albums, setAlbums] = useState(initial);
 
   function onChange(index, updated) {
     setAlbums((prev) => prev.map((a, i) => i === index ? updated : a));
+  }
+
+  function handleRemove(index) {
+    const removed = albums[index];
+    setAlbums((prev) => prev.filter((_, i) => i !== index));
+    if (onRemove) onRemove(removed);
   }
 
   const anyInvalid = albums.some(
@@ -202,7 +216,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset }) {
       </div>
 
       {albums.map((a, i) => (
-        <AlbumPanel key={a.zip_name + i} albumMeta={a} index={i} onChange={onChange} />
+        <AlbumPanel key={a.zip_name + i} albumMeta={a} index={i} onChange={onChange} onRemove={handleRemove} />
       ))}
 
       <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
