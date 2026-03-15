@@ -209,13 +209,16 @@ def process_album(req: ProcessRequest) -> list[str]:
 
 async def process_sc_album(req: ScProcessRequest) -> list[str]:
     """
-    Download SoundCloud tracks in their native audio format and store them raw
-    under MUSIC_LIBRARY_PATH.  No conversion — the external processor service
-    handles that on the more powerful machine.
+    Download SoundCloud tracks, embed metadata + cover art, then store under
+    MUSIC_LIBRARY_PATH in their native audio format.
+
+    Tag embedding is done here via mutagen (no FFmpeg needed).
+    The external processor service may do further processing if desired.
     """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
+    from soundcloud.tagger import embed_tags, fetch_cover
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -227,6 +230,15 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
         req = req.model_copy(update={"album_artist": req.artist})
     if req.is_single and not req.album:
         req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
+
+    # Fetch shared cover art once for the whole album (from first track with one)
+    shared_cover: Optional[bytes] = None
+    if req.cover_art_b64:
+        import base64 as _b64
+        try:
+            shared_cover = _b64.b64decode(req.cover_art_b64)
+        except Exception:
+            pass
 
     saved = []
     for t in req.tracks:
@@ -243,12 +255,34 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             else _safe(f"{t.track_number:02d} {t.title}")
         )
 
-        logger.info("Downloading SC track (raw): %r → %s/", t.sc_url, out_dir)
+        # Per-track cover takes priority over album cover
+        cover: Optional[bytes] = shared_cover
+        if t.cover_art_b64:
+            import base64 as _b64
+            try:
+                cover = _b64.b64decode(t.cover_art_b64)
+            except Exception:
+                pass
+
+        meta = {
+            "title":        t.title,
+            "artist":       t.artist or req.artist,
+            "album_artist": req.album_artist,
+            "album":        req.album,
+            "release_year": req.release_year,
+            "track_number": t.track_number,
+        }
+
+        logger.info("Downloading SC track: %r → %s/", t.sc_url, out_dir)
         tmp_dir = tempfile.mkdtemp(prefix="sc_dl_")
         try:
             raw_file = await _run_in_thread(download_raw, t.sc_url, tmp_dir)
             ext  = os.path.splitext(raw_file)[1]
             dest = _find_ci(out_dir, base_name + ext)
+
+            # Embed tags before moving to final location
+            embed_tags(raw_file, meta, cover)
+
             shutil.move(raw_file, dest)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

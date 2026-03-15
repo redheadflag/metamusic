@@ -38,8 +38,8 @@ logger = logging.getLogger("processor")
 POLL_INTERVAL: int   = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
 DELETE_SOURCE: bool  = os.getenv("DELETE_SOURCE_AFTER_PROCESSING", "true").lower() == "true"
 WORKER_THREADS: int  = int(os.getenv("WORKER_THREADS", "2"))
-FFMPEG_CODEC: str    = os.getenv("FFMPEG_CODEC", "libmp3lame")
-FFMPEG_EXT: str      = os.getenv("FFMPEG_EXT", ".mp3")
+FFMPEG_CODEC: str    = os.getenv("FFMPEG_CODEC", "libopus")
+FFMPEG_EXT: str      = os.getenv("FFMPEG_EXT", ".opus")
 FFMPEG_MAX_BITRATE   = int(os.getenv("FFMPEG_MAX_BITRATE_KBPS", "256"))
 
 AUDIO_EXTENSIONS: frozenset[str] = frozenset(
@@ -56,7 +56,7 @@ from cloud import (          # noqa: E402
     input_to_output_path,
     sftp as _sftp_conn,
 )
-from ffmpeg_processor import convert  # noqa: E402
+from ffmpeg_processor import convert, probe, should_skip, pick_bitrate  # noqa: E402
 
 # ── State: skip files already processed this session ─────────────────────────
 
@@ -88,7 +88,23 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
                 logger.error("Download failed for %r: %s", remote_input, exc)
                 return
 
-            # 2 — Convert with FFmpeg
+            # 2 — Probe and decide whether to process
+            src_codec, src_kbps = await asyncio.to_thread(probe, local_src)
+            if should_skip(src_codec, src_kbps):
+                logger.info(
+                    "Skipping %s — already %s at %d kbps, no re-encoding needed",
+                    src_name, src_codec, src_kbps,
+                )
+                _processed.add(remote_input)
+                return
+
+            target_bitrate = pick_bitrate(src_codec, src_kbps, FFMPEG_MAX_BITRATE)
+            logger.info(
+                "Processing %s — codec=%s, src=%d kbps → target=%d kbps",
+                src_name, src_codec, src_kbps, target_bitrate,
+            )
+
+            # 3 — Convert with FFmpeg
             local_dest = os.path.join(tmp, PurePosixPath(src_name).stem + FFMPEG_EXT)
             try:
                 await asyncio.to_thread(
@@ -96,13 +112,13 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
                     src=local_src,
                     dest=local_dest,
                     codec=FFMPEG_CODEC,
-                    max_bitrate=FFMPEG_MAX_BITRATE,
+                    target_bitrate=target_bitrate,
                 )
             except Exception as exc:
                 logger.error("FFmpeg failed for %r: %s", remote_input, exc)
                 return
 
-            # 3 — Upload to output path on the same SFTP server
+            # 4 — Upload to output path on the same SFTP server
             remote_output = input_to_output_path(remote_input, FFMPEG_EXT)
             try:
                 await asyncio.to_thread(upload_file, local_dest, remote_output)
@@ -111,7 +127,7 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
                 logger.error("Upload failed for %r: %s", remote_output, exc)
                 return
 
-        # 4 — Mark done and optionally remove the raw source
+        # 5 — Mark done and optionally remove the raw source
         _processed.add(remote_input)
 
         if DELETE_SOURCE:
@@ -139,6 +155,7 @@ async def poll_loop() -> None:
     while True:
         try:
             files = await asyncio.to_thread(list_input_files)
+            logger.info("Polling: found %d file(s) in unprocessed/", len(files))
             new   = [f for f in files if f not in _processed]
             if new:
                 logger.info("Queuing %d new file(s) …", len(new))
@@ -149,27 +166,6 @@ async def poll_loop() -> None:
             logger.error("Poll error: %s", exc)
 
         await asyncio.sleep(POLL_INTERVAL)
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Process all files currently in unprocessed/ and exit (no polling).",
-    )
-    args = parser.parse_args()
-
-    try:
-        asyncio.run(run_once() if args.once else poll_loop())
-    except KeyboardInterrupt:
-        logger.info("Shutting down …")
-    finally:
-        _sftp_conn.close()
-
 
 # ── One-shot pass ─────────────────────────────────────────────────────────────
 
@@ -191,3 +187,23 @@ async def run_once() -> None:
     logger.info("Processing %d file(s) …", len(files))
     await asyncio.gather(*[asyncio.create_task(_handle_file(f, sem)) for f in files])
     logger.info("Done.")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Process all files currently in unprocessed/ and exit (no polling).",
+    )
+    args = parser.parse_args()
+
+    try:
+        asyncio.run(run_once() if args.once else poll_loop())
+    except KeyboardInterrupt:
+        logger.info("Shutting down …")
+    finally:
+        _sftp_conn.close()
