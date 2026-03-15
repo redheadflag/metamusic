@@ -3,30 +3,24 @@ ARQ task functions.
 
 Each function receives `ctx` (the ARQ job context) as the first argument,
 followed by the serialised request data.  Tasks run inside the ARQ worker
-process and therefore have full access to processing.py / yt_sc_fetch, etc.
+process and have full access to processing.py / soundcloud/, etc.
 
-Important: tasks no longer run FFmpeg.  Their sole responsibility is to
-copy / download raw audio files into MUSIC_LIBRARY_PATH.  The standalone
-processor service (running on a more powerful machine) reads from that same
-folder and performs the FFmpeg conversion + metadata embedding.
+Tasks copy / download raw audio files into MUSIC_LIBRARY_PATH.
+The standalone processor service performs conversion + metadata embedding.
 """
 
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# task: process_album_task
-# Corresponds to POST /api/process
+# task: process_album_task  (POST /api/process)
 # ---------------------------------------------------------------------------
 
+
 async def process_album_task(ctx, req_dict: dict) -> dict:
-    """
-    Copy uploaded tracks (raw, unprocessed) to MUSIC_LIBRARY_PATH.
-    `req_dict` is a plain dict representation of ProcessRequest.
-    """
+    """Copy uploaded tracks (raw) to MUSIC_LIBRARY_PATH."""
     from models import ProcessRequest
     from processing import process_album
 
@@ -34,7 +28,6 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
     if not req.album_artist:
         req = req.model_copy(update={"album_artist": req.artist})
-
     if req.is_single and not req.album:
         req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
@@ -49,18 +42,14 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# task: sc_process_task
-# Corresponds to POST /api/sc-process
+# task: sc_process_task  (POST /api/sc-process)
 # ---------------------------------------------------------------------------
 
+
 async def sc_process_task(ctx, req_dict: dict) -> dict:
-    """
-    Download SoundCloud tracks in their native format and store them raw in
-    MUSIC_LIBRARY_PATH (no conversion).
-    `req_dict` is a plain dict representation of ScProcessRequest.
-    """
+    """Download SoundCloud tracks in native format and store raw."""
     from models import ScProcessRequest
-    from main import process_sc_album   # shared helper lives in main.py
+    from processing import process_sc_album
 
     req = ScProcessRequest(**req_dict)
 
@@ -75,18 +64,14 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# task: process_bulk_task
-# Corresponds to POST /api/process-bulk
+# task: process_bulk_task  (POST /api/process-bulk)
 # ---------------------------------------------------------------------------
 
+
 async def process_bulk_task(ctx, req_dict: dict) -> dict:
-    """
-    Store multiple albums' raw files in one job (e.g. from zip uploads).
-    `req_dict` is a plain dict representation of BulkProcessRequest.
-    """
-    from models import BulkProcessRequest, ProcessRequest
-    from processing import process_album
-    from main import process_sc_album
+    """Store multiple albums' raw files in one job (e.g. from zip uploads)."""
+    from models import BulkProcessRequest
+    from processing import process_album, process_sc_album
 
     req = BulkProcessRequest(**req_dict)
 
@@ -102,8 +87,7 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
         if not album_req.album:
             raise ValueError("album is required for each entry")
 
-        is_sc = any(t.sc_url for t in album_req.tracks)
-        if is_sc:
+        if any(t.sc_url for t in album_req.tracks):
             saved = await process_sc_album(album_req)
         else:
             saved = process_album(album_req)
@@ -118,11 +102,11 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 # WorkerSettings — picked up by `arq worker.main.WorkerSettings`
 # ---------------------------------------------------------------------------
 
-from worker.settings import get_redis_settings   # noqa: E402  (after task defs)
+from worker.settings import get_redis_settings  # noqa: E402
 
 
 class WorkerSettings:
-    """ARQ worker configuration loaded by `arq worker.main.WorkerSettings`."""
+    """ARQ worker configuration."""
 
     functions = [
         process_album_task,
@@ -134,8 +118,4 @@ class WorkerSettings:
 
     max_tries = 2
     max_jobs = 1
-
     job_timeout = 3600
-
-    on_startup = None
-    on_shutdown = None

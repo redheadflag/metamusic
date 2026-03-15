@@ -1,11 +1,10 @@
 """
-SoundCloud API v2 client using httpx for better TLS fingerprinting.
+SoundCloud API v2 client using httpx.
 """
 
 import base64
 import os
 import re
-import json
 import logging
 from typing import Optional
 
@@ -13,10 +12,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SC_API        = "https://api-v2.soundcloud.com"
-SC_CLIENT_ID  = os.environ.get("SC_CLIENT_ID", "")
+SC_API         = "https://api-v2.soundcloud.com"
+SC_CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-HTTPS_PROXY   = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
+HTTPS_PROXY    = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
 
 def _client() -> httpx.Client:
@@ -176,7 +175,6 @@ def resolve_url(sc_url: str) -> list[dict]:
 
 def _clean_artist_url(sc_url: str) -> str:
     """Strip UI-only path suffixes that the API resolve endpoint doesn't understand."""
-    import re
     return re.sub(r"/(albums|tracks|sets|likes|following|followers|reposts|spotlight)\/?$", "", sc_url.rstrip("/"))
 
 
@@ -195,7 +193,6 @@ def resolve_artist(sc_url: str) -> list[dict]:
     username = data.get("username") or data.get("permalink") or str(user_id)
     logger.info("Fetching artist profile: %s (id=%s)", username, user_id)
 
-    # Fetch all playlists (albums + sets)
     playlists_data = _get(f"/users/{user_id}/playlists", {"limit": 50, "representation": "full"})
     playlists = playlists_data if isinstance(playlists_data, list) else playlists_data.get("collection", [])
     logger.info("Found %d playlists for %s", len(playlists), username)
@@ -210,7 +207,6 @@ def resolve_artist(sc_url: str) -> list[dict]:
             for t in pl.get("tracks") or []:
                 playlist_track_ids.add(t.get("id"))
 
-    # Fetch loose tracks (not in any playlist) — may 403 on private profiles
     loose = []
     try:
         tracks_data = _get(f"/users/{user_id}/tracks", {"limit": 50})
@@ -228,7 +224,7 @@ def resolve_artist(sc_url: str) -> list[dict]:
             tracks=parsed,
             artist=first["artist"],
             album_artist=first["artist"],
-            album="",   # user will fill in
+            album="",  # user will fill in
             release_year=first["release_year"],
             cover_art_b64=first.get("cover_art_b64"),
         ))

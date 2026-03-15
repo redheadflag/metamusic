@@ -4,7 +4,7 @@ import subprocess
 
 
 def log(msg: str) -> None:
-    print(f"[yt_sc_fetch] {msg}", flush=True)
+    print(f"[soundcloud] {msg}", flush=True)
 
 
 def warn(msg: str) -> None:

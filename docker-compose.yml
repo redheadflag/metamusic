@@ -41,7 +41,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${MUSIC_LIBRARY_PATH}:/music
+      - ${MUSIC_LIBRARY_PATH}/unprocessed:/music
       - ./config:/app/config
     depends_on:
       - redis

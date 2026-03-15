@@ -1,20 +1,18 @@
+"""
+Raw audio download from SoundCloud via yt-dlp.
+
+No FFmpeg post-processing — files are saved in their native format.
+The external processor service is responsible for conversion and tagging.
+"""
+
 import json
 import math
 import os
-import shutil
-import tempfile
 
-from .audio import download_track, embed_metadata, fetch_cover_art
-from .metadata import (
-    parse_sc_metadata,
-    apply_sc_overrides,
-    display_metadata,
-    _normalize,
-)
-from .utils import log, die, run, safe_name
+from .utils import log, run
 
-SC_SEARCH_RESULTS = 10  # results per scsearch query
 YTDLP_CONFIG = os.environ.get("YTDLP_CONFIG", "/app/config/yt-dlp.conf")
+SC_SEARCH_RESULTS = 10
 
 
 def _ytdlp_base() -> list[str]:
@@ -25,17 +23,44 @@ def _ytdlp_base() -> list[str]:
     return cmd
 
 
+def download_raw(sc_url: str, tmp_dir: str) -> str:
+    """
+    Download the best available audio for *sc_url* into *tmp_dir*.
+    Returns the path of the produced file (native format, no conversion).
+    Raises RuntimeError on failure.
+    """
+    output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
+    result = run(_ytdlp_base() + [
+        "--no-playlist",
+        "--format", "bestaudio/best",
+        "--no-embed-metadata", "--no-embed-thumbnail",
+        "--output", output_tmpl,
+        sc_url,
+    ])
+    if result.returncode != 0:
+        raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
+    files = os.listdir(tmp_dir)
+    if not files:
+        raise RuntimeError("yt-dlp produced no file")
+    return os.path.join(tmp_dir, files[0])
+
+
 # ---------------------------------------------------------------------------
-# Search
+# Search helpers (used by CLI / batch flows)
 # ---------------------------------------------------------------------------
+
+def _normalize(s: str) -> str:
+    """Lowercase and strip typographic quotes for fuzzy comparison."""
+    return s.lower().translate(
+        str.maketrans("\u2018\u2019\u201c\u201d\u02bc\u0060", "''\"\"\u0027\u0027")
+    )
 
 
 def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
     search_url = f"scsearch{n}:{query}"
     log(f"  SC search: {search_url!r}")
     result = run(
-        _ytdlp_base()
-        + [
+        _ytdlp_base() + [
             "--dump-json",
             "--flat-playlist",
             "--no-playlist",
@@ -54,9 +79,7 @@ def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
     return tracks
 
 
-def find_best_sc_track(
-    album_artist: str, track_title: str, target_duration: int
-) -> dict:
+def find_best_track(album_artist: str, track_title: str, target_duration: int) -> dict:
     """
     Search SoundCloud and return the best-matching track dict, or {} on miss.
 
@@ -94,37 +117,14 @@ def find_best_sc_track(
     return {}
 
 
-def fetch_full_sc_track_info(track: dict) -> dict:
-    """Re-fetch full metadata for a flat-playlist result (adds thumbnail, etc.)."""
-    url = track.get("webpage_url") or track.get("url") or ""
-    if not url:
-        return track
-    log(f"Fetching full SC track info: {url}")
-    result = run(
-        _ytdlp_base() + ["--dump-json", "--no-playlist", "--skip-download", url]
-    )
-    if result.returncode != 0:
-        return track
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return track
-
-
-# ---------------------------------------------------------------------------
-# Fetch playlist / single track entries
-# ---------------------------------------------------------------------------
-
-
-def fetch_sc_entries(sc_url: str) -> list[dict]:
+def fetch_entries(sc_url: str) -> list[dict]:
     """
     Return a list of raw yt-dlp info dicts from a SoundCloud URL.
     Works for single tracks, playlists, and albums.
     """
     log(f"Fetching SoundCloud entries for: {sc_url}")
     result = run(
-        _ytdlp_base()
-        + [
+        _ytdlp_base() + [
             "--dump-json",
             "--yes-playlist",
             "--skip-download",
@@ -142,42 +142,22 @@ def fetch_sc_entries(sc_url: str) -> list[dict]:
             pass
 
     if not entries:
-        die(f"yt-dlp returned no entries for SoundCloud URL.\n{result.stderr}")
+        raise RuntimeError(f"yt-dlp returned no entries for SoundCloud URL.\n{result.stderr}")
 
     log(f"Found {len(entries)} SC entry/entries.")
     return entries
 
 
-# ---------------------------------------------------------------------------
-# Process one SC entry end-to-end
-# ---------------------------------------------------------------------------
-
-
-def process_sc_entry(
-    raw: dict,
-    MUSIC_LIBRARY_PATH: str,
-    track_number: int | None = None,
-    overrides: dict | None = None,
-) -> None:
-    """Parse SC metadata, apply overrides, display, download, tag, and save."""
-    meta = parse_sc_metadata(raw, track_number=track_number)
-    if overrides:
-        meta = apply_sc_overrides(meta, overrides)
-    cover_art = fetch_cover_art(raw)
-
-    display_metadata(meta)
-
-    out_dir = os.path.join(
-        MUSIC_LIBRARY_PATH, safe_name(meta["album_artist"]), safe_name(meta["album"])
-    )
-    os.makedirs(out_dir, exist_ok=True)
-    safe_file_name = safe_name(f"{meta['artist']} — {meta['track']}") + ".mp3"
-    final_path = os.path.join(out_dir, safe_file_name)
-
-    sc_track = {"webpage_url": raw.get("webpage_url") or raw.get("url")}
-    with tempfile.TemporaryDirectory() as tmpdir:
-        mp3_path = download_track(sc_track, tmpdir)
-        embed_metadata(mp3_path, meta, cover_art)
-        shutil.move(mp3_path, final_path)
-
-    log(f"Saved: {final_path}")
+def fetch_full_track_info(track: dict) -> dict:
+    """Re-fetch full metadata for a flat-playlist result (adds thumbnail, etc.)."""
+    url = track.get("webpage_url") or track.get("url") or ""
+    if not url:
+        return track
+    log(f"Fetching full SC track info: {url}")
+    result = run(_ytdlp_base() + ["--dump-json", "--no-playlist", "--skip-download", url])
+    if result.returncode != 0:
+        return track
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return track
