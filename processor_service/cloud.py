@@ -23,6 +23,7 @@ Layout on the remote machine
 import logging
 import os
 import stat
+import threading
 from pathlib import PurePosixPath
 
 import paramiko  # type: ignore
@@ -57,6 +58,7 @@ class SFTPConnection:
     def __init__(self) -> None:
         self._ssh:  paramiko.SSHClient  | None = None
         self._sftp: paramiko.SFTPClient | None = None
+        self._lock = threading.Lock()
 
     def _connect(self) -> None:
         logger.info("SFTP connecting to %s@%s:%d …", SFTP_USER, SFTP_HOST, SFTP_PORT)
@@ -107,8 +109,9 @@ class SFTPConnection:
         Recursively list all files under INPUT_DIR.
         Returns absolute remote paths.
         """
-        sftp = self._ensure()
-        found: list[str] = []
+        with self._lock:
+            sftp = self._ensure()
+            found: list[str] = []
 
         def _walk(remote_dir: str) -> None:
             try:
@@ -127,22 +130,25 @@ class SFTPConnection:
 
     def download(self, remote_path: str, local_path: str) -> None:
         """Download a single file from the remote to *local_path*."""
-        sftp = self._ensure()
-        sftp.get(remote_path, local_path)
+        with self._lock:
+            sftp = self._ensure()
+            sftp.get(remote_path, local_path)
 
     def upload(self, local_path: str, remote_path: str) -> None:
         """
         Upload *local_path* to *remote_path*, creating any missing
         parent directories on the remote.
         """
-        sftp = self._ensure()
-        self._makedirs(sftp, str(PurePosixPath(remote_path).parent))
-        sftp.put(local_path, remote_path)
+        with self._lock:
+            sftp = self._ensure()
+            self._makedirs(sftp, str(PurePosixPath(remote_path).parent))
+            sftp.put(local_path, remote_path)
 
     def delete(self, remote_path: str) -> None:
         """Remove a file from the remote."""
-        sftp = self._ensure()
-        sftp.remove(remote_path)
+        with self._lock:
+            sftp = self._ensure()
+            sftp.remove(remote_path)
 
     def _makedirs(self, sftp: paramiko.SFTPClient, remote_dir: str) -> None:
         """Recursively create *remote_dir* if it does not exist."""
