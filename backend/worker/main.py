@@ -2,8 +2,7 @@
 ARQ task functions.
 
 After each task completes:
-  1. rclone VFS cache is refreshed so the mount sees new files.
-  2. Navidrome library scan is triggered so tracks appear immediately.
+  1. Navidrome library scan is triggered so tracks appear immediately.
 """
 
 import logging
@@ -12,10 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _post_process() -> None:
-    """Refresh rclone VFS and trigger a Navidrome scan."""
-    from services.rclone import refresh_vfs
+    """Trigger a Navidrome scan."""
     from services.navidrome import trigger_scan
-    refresh_vfs()
     await trigger_scan()
 
 
