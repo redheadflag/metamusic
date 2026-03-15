@@ -167,7 +167,7 @@ async def process(req: ProcessRequest):
 
 @app.post("/api/sc-process", response_model=JobStatus, status_code=202)
 async def sc_process(req: ScProcessRequest):
-    """Enqueue SoundCloud download+process job."""
+    """Enqueue SoundCloud download+store job."""
     if not req.tracks:
         raise HTTPException(400, "No tracks provided")
     if not req.album and not req.is_single:
@@ -272,12 +272,17 @@ async def sc_fetch(body: dict):
     return results
 
 
-async def _process_sc_album(req) -> list[str]:
-    """Shared SC download+convert logic (called by worker tasks)."""
-    import base64
-    import tempfile as tf
+async def process_sc_album(req) -> list[str]:
+    """
+    Download SoundCloud tracks in their best available audio quality and store
+    them raw (no FFmpeg) into MUSIC_LIBRARY_PATH.
+
+    The standalone processor service is responsible for converting and tagging
+    these files on the more powerful machine.
+    """
     import shutil
-    from processing import _to_mp3, _safe, _find_ci, MUSIC_LIBRARY_PATH
+    import tempfile as tf
+    from processing import _safe, _find_ci, MUSIC_LIBRARY_PATH
 
     is_single = getattr(req, "is_single", False)
 
@@ -286,70 +291,51 @@ async def _process_sc_album(req) -> list[str]:
     if is_single and not req.album:
         req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
-    cover_bytes: bytes | None = None
-    if req.cover_art_b64:
-        cover_bytes = base64.b64decode(req.cover_art_b64)
-
     saved = []
     for t in req.tracks:
         if not t.sc_url:
             raise ValueError(f"Missing sc_url for track '{t.title}'")
 
-        art = cover_bytes or (base64.b64decode(t.cover_art_b64) if t.cover_art_b64 else None)
         track_num = t.track_number
         album = req.album
-
-        meta = {
-            "title":        t.title,
-            "artist":       req.artist,
-            "album_artist": req.album_artist,
-            "album":        album,
-            "release_year": req.release_year,
-            "track_number": None if is_single else track_num,
-            "composer":     t.composer,
-            "language":     t.language,
-            "lyrics":       t.lyrics,
-            "publisher":    getattr(req, "publisher", None),
-        }
 
         artist_dir = _find_ci(MUSIC_LIBRARY_PATH, _safe(req.album_artist))
         out_dir    = _find_ci(artist_dir, _safe(album))
         os.makedirs(out_dir, exist_ok=True)
 
-        fname = (
-            _safe(t.title) + ".mp3" if is_single
-            else _safe(f"{track_num:02d} {t.title}") + ".mp3"
+        # Destination filename keeps the raw extension (filled in after download)
+        base_name = (
+            _safe(t.title) if is_single
+            else _safe(f"{track_num:02d} {t.title}")
         )
-        dest = _find_ci(out_dir, fname)
-        logger.info("Downloading SC track: %r → %s", t.sc_url, dest)
 
-        def _download_and_convert(sc_url, tmp_dir, dest, meta, art):
+        def _download_raw(sc_url, tmp_dir):
+            """Download best audio to tmp_dir, return the produced file path."""
             from yt_sc_fetch.utils import run as yt_run
             from yt_sc_fetch.sc import _ytdlp_base
             output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
             result = yt_run(_ytdlp_base() + [
                 "--no-playlist",
                 "--format", "bestaudio/best",
-                "--extract-audio", "--audio-format", "mp3",
-                "--audio-quality", "0",
+                # No --extract-audio / --audio-format: keep the native format
                 "--no-embed-metadata", "--no-embed-thumbnail",
                 "--output", output_tmpl,
                 sc_url,
             ])
             if result.returncode != 0:
                 raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
-            mp3 = next(
-                (os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".mp3")),
-                None,
-            )
-            if not mp3:
-                raise RuntimeError("yt-dlp produced no mp3 file")
-            _to_mp3(mp3, dest, meta, art)
-            os.unlink(mp3)
+            files = os.listdir(tmp_dir)
+            if not files:
+                raise RuntimeError("yt-dlp produced no file")
+            return os.path.join(tmp_dir, files[0])
 
+        logger.info("Downloading SC track (raw): %r → %s/", t.sc_url, out_dir)
         tmp_dir = tf.mkdtemp(prefix="sc_dl_")
         try:
-            await _run_blocking(_download_and_convert, t.sc_url, tmp_dir, dest, meta, art)
+            raw_file = await _run_blocking(_download_raw, t.sc_url, tmp_dir)
+            ext = os.path.splitext(raw_file)[1]
+            dest = _find_ci(out_dir, base_name + ext)
+            shutil.move(raw_file, dest)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

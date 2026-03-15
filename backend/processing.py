@@ -2,13 +2,14 @@ import base64
 import logging
 import os
 import re
+import shutil
 from typing import Optional
 
 from models import TrackMeta, ProcessRequest
 
 logger = logging.getLogger(__name__)
 
-MUSIC_LIBRARY_PATH = "/music"
+MUSIC_LIBRARY_PATH = os.environ.get("MUSIC_LIBRARY_PATH", "/music")
 
 
 def _safe(s: str) -> str:
@@ -173,178 +174,56 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
 
 
 # ---------------------------------------------------------------------------
-# Embed tags and save to MUSIC_LIBRARY_PATH
+# Save raw files to MUSIC_LIBRARY_PATH (no FFmpeg — processing happens
+# on the separate processor service that reads from this folder)
 # ---------------------------------------------------------------------------
 
 
-def _source_bitrate(path: str) -> int:
-    """Return audio bitrate in kbps using ffprobe, or 0 on failure."""
-    import subprocess
-    import json
+def _build_dest_path(
+    req: ProcessRequest,
+    t: TrackMeta,
+    is_single: bool,
+) -> str:
+    """Return the destination path under MUSIC_LIBRARY_PATH, preserving the
+    original file extension so the processor service receives the raw format."""
+    src_ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
 
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_streams",
-                "-select_streams",
-                "a:0",
-                path,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        streams = json.loads(result.stdout).get("streams", [])
-        if streams:
-            return int(streams[0].get("bit_rate", 0)) // 1000
-    except Exception:
-        pass
-    return 0
+    artist_dir = _find_ci(MUSIC_LIBRARY_PATH, _safe(req.album_artist))
+    out_dir = _find_ci(artist_dir, _safe(req.album))
+    os.makedirs(out_dir, exist_ok=True)
 
-
-def _to_mp3(src: str, dest: str, meta: dict, cover_bytes: Optional[bytes]) -> None:
-    """
-    Convert *src* to MP3 at ≤256 kbps and embed metadata via ffmpeg.
-    If the source is already MP3 at ≤256 kbps the audio stream is copied
-    without re-encoding to avoid generation loss.
-    """
-    import subprocess
-    import tempfile
-
-    src_kbps = _source_bitrate(src)
-    is_mp3 = src.lower().endswith(".mp3")
-    target_br = min(src_kbps, 256) if src_kbps > 0 else 256
-
-    # Stream-copy only when already MP3 and within limit
-    if is_mp3 and src_kbps <= 256:
-        audio_opts = ["-c:a", "copy"]
+    if is_single:
+        fname = _safe(t.title) + src_ext
     else:
-        audio_opts = ["-c:a", "libmp3lame", "-b:a", f"{target_br}k", "-q:a", "0"]
+        fname = _safe(f"{t.track_number:02d} {t.title}") + src_ext
 
-    cmd = ["ffmpeg", "-y", "-i", src]
-
-    # Attach cover art as a second input if available
-    if cover_bytes:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(cover_bytes)
-            cover_path = tmp.name
-        cmd += ["-i", cover_path]
-        map_opts = ["-map", "0:a", "-map", "1:v"]
-        cover_opts = ["-c:v", "mjpeg", "-disposition:v", "attached_pic"]
-    else:
-        cover_path = None
-        map_opts = ["-map", "0:a"]
-        cover_opts = []
-
-    extra = []
-    if meta.get("composer"):
-        extra += ["-metadata", f"composer={meta['composer']}"]
-    if meta.get("publisher"):
-        extra += ["-metadata", f"publisher={meta['publisher']}"]
-    if meta.get("language"):
-        extra += ["-metadata", f"language={meta['language']}"]
-    if meta.get("lyrics"):
-        extra += ["-metadata", f"lyrics={meta['lyrics']}"]
-
-    cmd += (
-        map_opts
-        + audio_opts
-        + cover_opts
-        + [
-            "-map_metadata",
-            "-1",  # strip all input metadata
-            "-id3v2_version",
-            "3",
-            "-metadata",
-            f"title={meta['title']}",
-            "-metadata",
-            f"artist={meta['artist']}",
-            "-metadata",
-            f"album_artist={meta['album_artist']}",
-            "-metadata",
-            f"album={meta['album']}",
-            "-metadata",
-            f"date={meta['release_year']}",
-            *(
-                []
-                if meta["track_number"] is None
-                else ["-metadata", f"track={meta['track_number']}"]
-            ),
-            *extra,
-            dest,
-        ]
-    )
-
-    logger.info(
-        "ffmpeg: %s → %s (%s, %d kbps → %d kbps)",
-        os.path.basename(src),
-        os.path.basename(dest),
-        "copy" if is_mp3 and src_kbps <= 256 else "encode",
-        src_kbps,
-        target_br,
-    )
-
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-    if cover_path:
-        os.unlink(cover_path)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed:\n{result.stderr[-1000:]}")
+    return _find_ci(out_dir, fname)
 
 
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Convert every track to MP3 (≤256 kbps), embed metadata, save to MUSIC_LIBRARY_PATH.
-    Single track uploads get album = "<title> (Single)" and no track number prefix.
+    Copy every uploaded track (raw, unprocessed) into MUSIC_LIBRARY_PATH,
+    preserving the original file format (FLAC, M4A, MP3, …).
+
+    FFmpeg conversion and metadata embedding are handled by the standalone
+    processor service that reads from this same folder on the powerful machine.
+
+    Single track uploads get album = "<title> (Single)" and no track-number prefix.
     """
     is_single = req.is_single
 
-    cover_bytes: Optional[bytes] = None
-    if req.cover_art_b64:
-        cover_bytes = base64.b64decode(req.cover_art_b64)
-
     saved = []
     for t in req.tracks:
-        art = cover_bytes
-        if art is None and t.cover_art_b64:
-            art = base64.b64decode(t.cover_art_b64)
+        dest = _build_dest_path(req, t, is_single)
 
-        album = req.album
-
-        meta = {
-            "title": t.title,
-            "artist": req.artist,
-            "album_artist": req.album_artist,
-            "album": album,
-            "release_year": req.release_year,
-            "track_number": None if is_single else t.track_number,
-            "composer": t.composer,
-            "language": t.language,
-            "lyrics": t.lyrics,
-            "publisher": req.publisher,
-        }
-
-        # Build output path case-insensitively so "Artist" and "artist" map
-        # to the same folder, and overwrite any existing file with the same name.
-        artist_dir = _find_ci(MUSIC_LIBRARY_PATH, _safe(req.album_artist))
-        out_dir = _find_ci(artist_dir, _safe(album))
-        os.makedirs(out_dir, exist_ok=True)
-
-        fname = (
-            _safe(t.title) + ".mp3"
-            if is_single
-            else _safe(f"{t.track_number:02d} {t.title}") + ".mp3"
+        logger.info(
+            "Storing raw file: %s → %s",
+            os.path.basename(t.temp_path),
+            dest,
         )
-        dest = _find_ci(out_dir, fname)
-
-        _to_mp3(t.temp_path, dest, meta, art)
-        os.unlink(t.temp_path)
+        if os.path.abspath(t.temp_path) != os.path.abspath(dest):
+            shutil.copy2(t.temp_path, dest)
+            os.unlink(t.temp_path)
         saved.append(dest)
 
     return saved

@@ -10,7 +10,9 @@ Album upload flow
    • if any missing → state: fixing_shared, ask one by one
 5. Bot checks per-track title
    • if missing     → state: fixing_track_title, ask one by one
-6. Bot embeds metadata, moves files to MUSIC_LIBRARY_PATH/<album_artist>/<album>/
+6. Bot moves the raw files into MUSIC_LIBRARY_PATH/<album_artist>/<album>/
+   preserving their original format (no FFmpeg — the processor service handles
+   conversion on the more powerful machine).
 7. Done — back to main menu
 
 Note: Telegram's Bot API only exposes title, performer, and thumbnail on the
@@ -31,7 +33,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
 from backend.bot.keyboards import album_collect_menu, main_menu, BTN_ALBUM_DONE
-from yt_sc_fetch.audio import embed_metadata
 from yt_sc_fetch.utils import safe_name
 
 router = Router()
@@ -69,48 +70,78 @@ async def _download_file(bot: Bot, file_id: str, dest_path: str) -> None:
     await bot.download_file(file.file_path, dest_path)
 
 
-def _read_id3(path: str) -> dict:
+def _read_tags(path: str) -> dict:
     """
-    Read ID3 tags from a local file via mutagen.
+    Read ID3 / Vorbis tags from a local file via mutagen.
     Returns a dict with: title, artist, album_artist, album,
     release_year, track_number, cover_art (bytes | None).
     """
     try:
-        from mutagen.id3 import ID3
+        from mutagen import File as MutagenFile
     except ImportError:
         return {}
 
-    try:
-        tags = ID3(path)
-    except Exception:
+    audio = MutagenFile(path, easy=False)
+    if audio is None or audio.tags is None:
         return {}
 
-    def _text(key: str) -> str:
+    tags = audio.tags
+    is_id3 = hasattr(tags, "getall")
+
+    def _id3(key: str) -> str:
         frame = tags.get(key)
         return str(frame.text[0]).strip() if frame and frame.text else ""
 
-    cover_art: Optional[bytes] = None
-    apic_keys = [k for k in tags.keys() if k.startswith("APIC")]
-    if apic_keys:
-        cover_art = tags[apic_keys[0]].data
+    def _vorbis(key: str) -> str:
+        val = tags.get(key)
+        return str(val[0]).strip() if val else ""
 
-    track_number: Optional[int] = None
-    trck = tags.get("TRCK")
-    if trck and trck.text:
-        try:
-            track_number = int(str(trck.text[0]).split("/")[0])
-        except ValueError:
-            pass
+    if is_id3:
+        cover_art: Optional[bytes] = None
+        apic_keys = [k for k in tags.keys() if k.startswith("APIC")]
+        if apic_keys:
+            cover_art = tags[apic_keys[0]].data
 
-    return dict(
-        title=_text("TIT2"),
-        artist=_text("TPE1"),
-        album_artist=_text("TPE2"),
-        album=_text("TALB"),
-        release_year=_text("TDRC"),
-        track_number=track_number,
-        cover_art=cover_art,
-    )
+        track_number: Optional[int] = None
+        trck = tags.get("TRCK")
+        if trck and trck.text:
+            try:
+                track_number = int(str(trck.text[0]).split("/")[0])
+            except ValueError:
+                pass
+
+        return dict(
+            title=_id3("TIT2"),
+            artist=_id3("TPE1"),
+            album_artist=_id3("TPE2"),
+            album=_id3("TALB"),
+            release_year=_id3("TDRC"),
+            track_number=track_number,
+            cover_art=cover_art,
+        )
+    else:
+        cover_art = None
+        pictures = getattr(audio, "pictures", [])
+        if pictures:
+            cover_art = pictures[0].data
+
+        track_number = None
+        trckval = _vorbis("tracknumber")
+        if trckval:
+            try:
+                track_number = int(trckval.split("/")[0])
+            except ValueError:
+                pass
+
+        return dict(
+            title=_vorbis("title"),
+            artist=", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()),
+            album_artist=_vorbis("albumartist"),
+            album=_vorbis("album"),
+            release_year=_vorbis("date"),
+            track_number=track_number,
+            cover_art=cover_art,
+        )
 
 
 def _save_cover(cover_bytes: bytes, tmpdir: str) -> str:
@@ -168,7 +199,6 @@ async def collect_file(message: Message, state: FSMContext, bot: Bot) -> None:
             "file_id": audio.file_id,
             "file_name": audio.file_name or f"track_{len(tracks) + 1}.mp3",
             "message_id": message.message_id,
-            # Telegram-visible fields — may be empty; full tags come after download
             "tg_title": audio.title or "",
             "tg_performer": audio.performer or "",
             "tg_thumbnail_id": audio.thumbnail.file_id if audio.thumbnail else None,
@@ -186,9 +216,11 @@ async def collect_file(message: Message, state: FSMContext, bot: Bot) -> None:
         audio.thumbnail is not None,
     )
 
+    await state.update_data(tracks=tracks)
+
 
 # ---------------------------------------------------------------------------
-# Step 3 — download all files and read full ID3 tags
+# Step 3 — download all files and read full tags
 # ---------------------------------------------------------------------------
 
 
@@ -222,42 +254,41 @@ async def album_ready(message: Message, state: FSMContext, bot: Bot) -> None:
             await state.clear()
             return
 
-        id3 = _read_id3(local_path)
+        tags = _read_tags(local_path)
 
         logger.info(
-            "ID3 tags for track %d (%r): title=%r artist=%r album_artist=%r "
+            "Tags for track %d (%r): title=%r artist=%r album_artist=%r "
             "album=%r year=%r track_number=%r cover_art=%s",
             i,
             t["file_name"],
-            id3.get("title"),
-            id3.get("artist"),
-            id3.get("album_artist"),
-            id3.get("album"),
-            id3.get("release_year"),
-            id3.get("track_number"),
-            f"{len(id3['cover_art'])} bytes" if id3.get("cover_art") else "None",
+            tags.get("title"),
+            tags.get("artist"),
+            tags.get("album_artist"),
+            tags.get("album"),
+            tags.get("release_year"),
+            tags.get("track_number"),
+            f"{len(tags['cover_art'])} bytes" if tags.get("cover_art") else "None",
         )
 
         enriched.append(
             {
                 **t,
                 "local_path": local_path,
-                "title": id3.get("title") or t["tg_title"],
-                "track_number": id3.get("track_number") or i,
-                "release_year": id3.get("release_year") or "",
+                "title": tags.get("title") or t["tg_title"],
+                "track_number": tags.get("track_number") or i,
+                "release_year": tags.get("release_year") or "",
             }
         )
 
-        # Initialise shared fields from the first track
         if i == 1:
-            artist = id3.get("artist") or t["tg_performer"]
-            album_artist = id3.get("album_artist") or artist
-            cover_art = id3.get("cover_art")
+            artist = tags.get("artist") or t["tg_performer"]
+            album_artist = tags.get("album_artist") or artist
+            cover_art = tags.get("cover_art")
             shared = {
                 "artist": artist,
                 "album_artist": album_artist,
-                "album": id3.get("album") or "",
-                "release_year": id3.get("release_year") or "",
+                "album": tags.get("album") or "",
+                "release_year": tags.get("release_year") or "",
                 "cover_art_path": _save_cover(cover_art, tmpdir) if cover_art else None,
             }
             logger.info(
@@ -367,7 +398,7 @@ async def _ask_next_title(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await _process_album(message, state)
+    await _store_raw_album(message, state)
 
 
 @router.message(AlbumStates.fixing_track_title, F.text)
@@ -381,22 +412,23 @@ async def receive_track_title(message: Message, state: FSMContext) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — embed metadata and save files
+# Step 6 — move raw files into MUSIC_LIBRARY_PATH (no FFmpeg)
 # ---------------------------------------------------------------------------
 
 
-async def _process_album(message: Message, state: FSMContext) -> None:
+async def _store_raw_album(message: Message, state: FSMContext) -> None:
+    """
+    Move each downloaded file (raw, original format) into:
+        MUSIC_LIBRARY_PATH/<album_artist>/<album>/<NN> <title><ext>
+
+    No metadata embedding or format conversion — the processor service
+    running on the more powerful machine will handle that.
+    """
     await state.set_state(AlbumStates.processing)
     data = await state.get_data()
     tracks = data.get("tracks", [])
     shared = data.get("shared", {})
     tmpdir = data.get("tmpdir", "")
-
-    cover_art: Optional[bytes] = None
-    cover_path = shared.get("cover_art_path")
-    if cover_path and os.path.exists(cover_path):
-        with open(cover_path, "rb") as f:
-            cover_art = f.read()
 
     out_dir = os.path.join(
         MUSIC_LIBRARY_PATH,
@@ -408,22 +440,12 @@ async def _process_album(message: Message, state: FSMContext) -> None:
     failed = []
     for i, t in enumerate(tracks, 1):
         track_num = t.get("track_number") or i
-        meta = {
-            "artist": shared["artist"],
-            "album_artist": shared["album_artist"],
-            "album": shared["album"],
-            "track": t["title"],
-            "track_number": track_num,
-            "release_year": t.get("release_year")
-            or shared.get("release_year")
-            or "0000",
-            "tags": [],
-        }
-        filename = safe_name(f"{track_num:02d} {t['title']}") + ".mp3"
+        src_ext = os.path.splitext(t["local_path"])[1] or ".mp3"
+        filename = safe_name(f"{track_num:02d} {t['title']}") + src_ext
         dest = os.path.join(out_dir, filename)
         try:
-            embed_metadata(t["local_path"], meta, cover_art)
             shutil.move(t["local_path"], dest)
+            logger.info("Stored raw: %s → %s", t["file_name"], dest)
         except Exception as exc:
             failed.append(f"{t['file_name']}: {exc}")
 
@@ -438,7 +460,7 @@ async def _process_album(message: Message, state: FSMContext) -> None:
         )
     else:
         await message.answer(
-            f"✅ Album <b>{shared['album']}</b> saved — {len(tracks)} track(s).\n"
+            f"✅ Album <b>{shared['album']}</b> stored — {len(tracks)} raw file(s) queued for processing.\n"
             f"📁 <code>{out_dir}</code>",
             parse_mode="HTML",
             reply_markup=main_menu,

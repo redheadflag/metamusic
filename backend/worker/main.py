@@ -5,7 +5,10 @@ Each function receives `ctx` (the ARQ job context) as the first argument,
 followed by the serialised request data.  Tasks run inside the ARQ worker
 process and therefore have full access to processing.py / yt_sc_fetch, etc.
 
-Heavy work is kept in the existing helpers so this file stays thin.
+Important: tasks no longer run FFmpeg.  Their sole responsibility is to
+copy / download raw audio files into MUSIC_LIBRARY_PATH.  The standalone
+processor service (running on a more powerful machine) reads from that same
+folder and performs the FFmpeg conversion + metadata embedding.
 """
 
 import logging
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def process_album_task(ctx, req_dict: dict) -> dict:
     """
-    Embed metadata and save uploaded tracks to the music library.
+    Copy uploaded tracks (raw, unprocessed) to MUSIC_LIBRARY_PATH.
     `req_dict` is a plain dict representation of ProcessRequest.
     """
     from models import ProcessRequest
@@ -29,7 +32,6 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
     req = ProcessRequest(**req_dict)
 
-    # Mirror the logic that was inline in the endpoint
     if not req.album_artist:
         req = req.model_copy(update={"album_artist": req.artist})
 
@@ -42,7 +44,7 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
     )
 
     saved = process_album(req)
-    logger.info("[job %s] saved: %s", ctx["job_id"], saved)
+    logger.info("[job %s] stored (raw): %s", ctx["job_id"], saved)
     return {"saved": saved}
 
 
@@ -53,11 +55,12 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
 async def sc_process_task(ctx, req_dict: dict) -> dict:
     """
-    Download SoundCloud tracks, convert to MP3, embed confirmed metadata.
+    Download SoundCloud tracks in their native format and store them raw in
+    MUSIC_LIBRARY_PATH (no conversion).
     `req_dict` is a plain dict representation of ScProcessRequest.
     """
     from models import ScProcessRequest
-    from main import _process_sc_album   # shared helper lives in main.py
+    from main import process_sc_album   # shared helper lives in main.py
 
     req = ScProcessRequest(**req_dict)
 
@@ -66,8 +69,8 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
         ctx["job_id"], req.artist, req.album, len(req.tracks),
     )
 
-    saved = await _process_sc_album(req)
-    logger.info("[job %s] SC saved: %s", ctx["job_id"], saved)
+    saved = await process_sc_album(req)
+    logger.info("[job %s] SC stored (raw): %s", ctx["job_id"], saved)
     return {"saved": saved}
 
 
@@ -78,12 +81,12 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
 
 async def process_bulk_task(ctx, req_dict: dict) -> dict:
     """
-    Process multiple albums in one job (e.g. from zip uploads).
+    Store multiple albums' raw files in one job (e.g. from zip uploads).
     `req_dict` is a plain dict representation of BulkProcessRequest.
     """
     from models import BulkProcessRequest, ProcessRequest
     from processing import process_album
-    from main import _process_sc_album
+    from main import process_sc_album
 
     req = BulkProcessRequest(**req_dict)
 
@@ -101,13 +104,13 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 
         is_sc = any(t.sc_url for t in album_req.tracks)
         if is_sc:
-            saved = await _process_sc_album(album_req)
+            saved = await process_sc_album(album_req)
         else:
             saved = process_album(album_req)
 
         all_saved.extend(saved)
 
-    logger.info("[job %s] bulk saved: %d file(s)", ctx["job_id"], len(all_saved))
+    logger.info("[job %s] bulk stored (raw): %d file(s)", ctx["job_id"], len(all_saved))
     return {"saved": all_saved}
 
 
@@ -129,13 +132,10 @@ class WorkerSettings:
 
     redis_settings = get_redis_settings()
 
-    # Retry failed jobs once before giving up
     max_tries = 2
     max_jobs = 1
 
-    # How long a single job may run (seconds).
-    # SC downloads can be slow, so give 30 minutes.
-    job_timeout = 1800
+    job_timeout = 3600
 
     on_startup = None
     on_shutdown = None
