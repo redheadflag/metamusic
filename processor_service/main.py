@@ -11,6 +11,7 @@ Workflow (per file):
   4. Upload the finished file to sftp://<host>/<SFTP_BASE>/<Artist>/<Album>/
      (mirrors the input tree, but one level up — outside "unprocessed").
   5. Delete the raw source from the "unprocessed" folder.
+  6. Refresh the rclone VFS cache so Navidrome sees the new file immediately.
 
 Configuration is read from the environment / .env file (see .env.example).
 """
@@ -22,6 +23,7 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,6 +44,8 @@ FFMPEG_CODEC: str    = os.getenv("FFMPEG_CODEC", "libopus")
 FFMPEG_EXT: str      = os.getenv("FFMPEG_EXT", ".opus")
 FFMPEG_MAX_BITRATE   = int(os.getenv("FFMPEG_MAX_BITRATE_KBPS", "256"))
 
+RCLONE_RC_URL: str   = os.getenv("RCLONE_RC_URL", "http://localhost:5572")
+
 AUDIO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aiff", ".aif", ".opus", ".weba", ".webm"}
 )
@@ -61,6 +65,23 @@ from ffmpeg_processor import convert, probe, should_skip, pick_bitrate  # noqa: 
 # ── State: skip files already processed this session ─────────────────────────
 
 _processed: set[str] = set()
+
+
+# ── rclone VFS refresh ────────────────────────────────────────────────────────
+
+def refresh_vfs() -> None:
+    """
+    Invalidate the rclone VFS directory cache so Navidrome sees
+    newly uploaded files immediately.
+    Non-fatal: logs a warning on failure and continues.
+    """
+    url = f"{RCLONE_RC_URL}/vfs/refresh"
+    try:
+        resp = httpx.post(url, params={"recursive": "true"}, timeout=10)
+        resp.raise_for_status()
+        logger.info("rclone VFS refreshed: %s", resp.json())
+    except Exception as exc:
+        logger.warning("rclone VFS refresh failed (non-fatal): %s", exc)
 
 
 # ── Per-file handler ──────────────────────────────────────────────────────────
@@ -136,6 +157,9 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
                 logger.info("Deleted source: %s", remote_input)
             except Exception as exc:
                 logger.warning("Could not delete source %r: %s", remote_input, exc)
+
+        # 6 — Refresh rclone VFS so Navidrome sees the uploaded file immediately
+        await asyncio.to_thread(refresh_vfs)
 
 
 # ── Poll loop ─────────────────────────────────────────────────────────────────

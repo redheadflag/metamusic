@@ -7,6 +7,8 @@ process and have full access to processing.py / soundcloud/, etc.
 
 Tasks copy / download raw audio files into MUSIC_LIBRARY_PATH.
 The standalone processor service performs conversion + metadata embedding.
+After each task completes, the rclone VFS cache is refreshed so Navidrome
+picks up the new files immediately.
 """
 
 import logging
@@ -23,6 +25,7 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
     """Copy uploaded tracks (raw) to MUSIC_LIBRARY_PATH."""
     from models import ProcessRequest
     from processing import process_album
+    from services.rclone import refresh_vfs
 
     req = ProcessRequest(**req_dict)
 
@@ -38,6 +41,8 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
     saved = process_album(req)
     logger.info("[job %s] stored (raw): %s", ctx["job_id"], saved)
+
+    refresh_vfs()
     return {"saved": saved}
 
 
@@ -50,6 +55,7 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
     """Download SoundCloud tracks in native format and store raw."""
     from models import ScProcessRequest
     from processing import process_sc_album
+    from services.rclone import refresh_vfs
 
     req = ScProcessRequest(**req_dict)
 
@@ -60,6 +66,8 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
 
     saved = await process_sc_album(req)
     logger.info("[job %s] SC stored (raw): %s", ctx["job_id"], saved)
+
+    refresh_vfs()
     return {"saved": saved}
 
 
@@ -72,6 +80,7 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
     """Store multiple albums' raw files in one job (e.g. from zip uploads)."""
     from models import BulkProcessRequest
     from processing import process_album, process_sc_album
+    from services.rclone import refresh_vfs
 
     req = BulkProcessRequest(**req_dict)
 
@@ -95,6 +104,8 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
         all_saved.extend(saved)
 
     logger.info("[job %s] bulk stored (raw): %d file(s)", ctx["job_id"], len(all_saved))
+
+    refresh_vfs()
     return {"saved": all_saved}
 
 
@@ -117,5 +128,5 @@ class WorkerSettings:
     redis_settings = get_redis_settings()
 
     max_tries = 2
-    max_jobs = 1
+    max_jobs = 2
     job_timeout = 3600
