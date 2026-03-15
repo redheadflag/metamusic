@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI):
     logger.info("ARQ Redis pool ready")
     yield
     await close_redis()
+    from services.sftp import close as close_sftp
+    close_sftp()
 
 
 app = FastAPI(title="metamusic", lifespan=lifespan)

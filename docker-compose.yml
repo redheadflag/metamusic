@@ -16,8 +16,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${MUSIC_LIBRARY_PATH}:/music
       - ./config:/app/config
+      - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -41,8 +41,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${MUSIC_LIBRARY_PATH}/unprocessed:/music
       - ./config:/app/config
+      - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
     depends_on:
       - redis
     develop:

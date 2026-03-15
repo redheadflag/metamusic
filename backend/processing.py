@@ -2,33 +2,17 @@ import base64
 import logging
 import os
 import re
-import shutil
 import tempfile
+import shutil
 from typing import Optional
 
 from models import ProcessRequest, ScProcessRequest, TrackMeta
 
 logger = logging.getLogger(__name__)
 
-MUSIC_LIBRARY_PATH = "/music"
-
 
 def _safe(s: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", s).strip()
-
-
-def _find_ci(parent: str, name: str) -> str:
-    """
-    Return `parent/name`, using a case-insensitive match against existing
-    entries. Falls back to the exact name.
-    """
-    if not os.path.isdir(parent):
-        return os.path.join(parent, name)
-    name_lower = name.lower()
-    for entry in os.listdir(parent):
-        if entry.lower() == name_lower:
-            return os.path.join(parent, entry)
-    return os.path.join(parent, name)
 
 
 def _normalize_artists(artist: str, title: str) -> tuple[str, str]:
@@ -101,9 +85,8 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         if apic_keys:
             cover_art_b64 = base64.b64encode(tags[apic_keys[0]].data).decode()
 
-        composer  = _id3("TCOM")
-        publisher = _id3("TPUB")
-        language  = _id3("TLAN")
+        composer     = _id3("TCOM")
+        language     = _id3("TLAN")
         lyrics_frame = tags.get("USLT::")
         if lyrics_frame is None:
             uslt_keys = [k for k in tags.keys() if k.startswith("USLT")]
@@ -132,7 +115,6 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
             cover_art_b64 = base64.b64encode(pictures[0].data).decode()
 
         composer  = _vorbis("composer")
-        publisher = _vorbis("organization") or _vorbis("publisher")
         language  = _vorbis("language")
         lyrics    = _vorbis("lyrics") or _vorbis("unsyncedlyrics") or None
 
@@ -167,58 +149,72 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
 
 
 # ---------------------------------------------------------------------------
-# Store uploaded files (raw, no conversion)
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-def _build_dest_path(req: ProcessRequest, t: TrackMeta, is_single: bool) -> str:
-    src_ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
-    artist_dir = _find_ci(MUSIC_LIBRARY_PATH, _safe(req.album_artist))
-    out_dir    = _find_ci(artist_dir, _safe(req.album))
-    os.makedirs(out_dir, exist_ok=True)
-    fname = (
-        _safe(t.title) + src_ext
-        if is_single
-        else _safe(f"{t.track_number:02d} {t.title}") + src_ext
-    )
-    return _find_ci(out_dir, fname)
+def _track_filename(t: TrackMeta, is_single: bool, ext: str) -> str:
+    if is_single:
+        return _safe(t.title) + ext
+    return _safe(f"{t.track_number:02d} {t.title}") + ext
+
+
+# ---------------------------------------------------------------------------
+# Upload uploaded files to SFTP unprocessed/
+# ---------------------------------------------------------------------------
 
 
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Copy every uploaded track (raw, unprocessed) into MUSIC_LIBRARY_PATH,
-    preserving the original file format (FLAC, M4A, MP3, …).
+    Upload every track (raw, unprocessed) to
+      <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
 
-    The external processor service handles conversion and metadata embedding.
+    Returns the list of remote paths.
     """
+    from services.sftp import upload_file, unprocessed_path
+
+    if not req.album_artist:
+        req = req.model_copy(update={"album_artist": req.artist})
+    if req.is_single and not req.album:
+        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
+
     saved = []
     for t in req.tracks:
-        dest = _build_dest_path(req, t, req.is_single)
-        logger.info("Storing raw file: %s → %s", os.path.basename(t.temp_path), dest)
-        if os.path.abspath(t.temp_path) != os.path.abspath(dest):
-            shutil.copy2(t.temp_path, dest)
+        ext         = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
+        fname       = _track_filename(t, req.is_single, ext)
+        remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
+
+        logger.info("Uploading via SFTP: %s → %s", os.path.basename(t.temp_path), remote_path)
+        upload_file(t.temp_path, remote_path)
+
+        # Clean up local temp file after successful upload
+        try:
             os.unlink(t.temp_path)
-        saved.append(dest)
+        except OSError:
+            pass
+
+        saved.append(remote_path)
+
     return saved
 
 
 # ---------------------------------------------------------------------------
-# Download SoundCloud tracks and store raw
+# Download SoundCloud tracks, tag them, upload to SFTP unprocessed/
 # ---------------------------------------------------------------------------
 
 
 async def process_sc_album(req: ScProcessRequest) -> list[str]:
     """
-    Download SoundCloud tracks, embed metadata + cover art, then store under
-    MUSIC_LIBRARY_PATH in their native audio format.
+    Download SoundCloud tracks, embed metadata + cover art, then upload to
+      <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
 
-    Tag embedding is done here via mutagen (no FFmpeg needed).
-    The external processor service may do further processing if desired.
+    Returns the list of remote paths.
     """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
-    from soundcloud.tagger import embed_tags, fetch_cover
+    from soundcloud.tagger import embed_tags
+    from services.sftp import upload_file, unprocessed_path
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -231,12 +227,11 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     if req.is_single and not req.album:
         req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
-    # Fetch shared cover art once for the whole album (from first track with one)
+    # Decode shared album cover (used when a track has no individual cover)
     shared_cover: Optional[bytes] = None
     if req.cover_art_b64:
-        import base64 as _b64
         try:
-            shared_cover = _b64.b64decode(req.cover_art_b64)
+            shared_cover = base64.b64decode(req.cover_art_b64)
         except Exception:
             pass
 
@@ -245,22 +240,11 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
         if not t.sc_url:
             raise ValueError(f"Missing sc_url for track '{t.title}'")
 
-        artist_dir = _find_ci(MUSIC_LIBRARY_PATH, _safe(req.album_artist))
-        out_dir    = _find_ci(artist_dir, _safe(req.album))
-        os.makedirs(out_dir, exist_ok=True)
-
-        base_name = (
-            _safe(t.title)
-            if req.is_single
-            else _safe(f"{t.track_number:02d} {t.title}")
-        )
-
         # Per-track cover takes priority over album cover
         cover: Optional[bytes] = shared_cover
         if t.cover_art_b64:
-            import base64 as _b64
             try:
-                cover = _b64.b64decode(t.cover_art_b64)
+                cover = base64.b64decode(t.cover_art_b64)
             except Exception:
                 pass
 
@@ -273,20 +257,22 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             "track_number": t.track_number,
         }
 
-        logger.info("Downloading SC track: %r → %s/", t.sc_url, out_dir)
         tmp_dir = tempfile.mkdtemp(prefix="sc_dl_")
         try:
+            logger.info("Downloading SC track: %r", t.sc_url)
             raw_file = await _run_in_thread(download_raw, t.sc_url, tmp_dir)
-            ext  = os.path.splitext(raw_file)[1]
-            dest = _find_ci(out_dir, base_name + ext)
 
-            # Embed tags before moving to final location
+            ext   = os.path.splitext(raw_file)[1]
+            fname = _track_filename(t, req.is_single, ext)
+            remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
+
             embed_tags(raw_file, meta, cover)
 
-            shutil.move(raw_file, dest)
+            logger.info("Uploading via SFTP: %s → %s", fname, remote_path)
+            await _run_in_thread(upload_file, raw_file, remote_path)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        saved.append(dest)
+        saved.append(remote_path)
 
     return saved

@@ -1,25 +1,35 @@
-.PHONY: dev deploy-frontend deploy-backend deploy logs clean-tmp
+.PHONY: dev deploy-frontend deploy-backend deploy logs clean-tmp check-env
 
-# Start and watch (auto-restarts on code changes)
-dev:
+# ── Environment guard ─────────────────────────────────────────────────────────
+# Fail fast if required SFTP vars are missing from .env
+check-env:
+	@for var in SFTP_HOST SFTP_USER SFTP_BASE; do \
+		grep -q "^$$var=" .env || { echo "ERROR: $$var is not set in .env"; exit 1; }; \
+	done
+	@echo "Environment OK."
+
+# ── Development ───────────────────────────────────────────────────────────────
+dev: check-env
 	docker compose up --build --watch
 
-# Rebuild and restart the backend container
-deploy-backend:
-	docker compose up --build -d
+# ── Backend ───────────────────────────────────────────────────────────────────
+deploy-backend: check-env
+	docker compose up --build -d backend worker bot
 
-# Rebuild frontend and copy to nginx web root
+# ── Frontend ──────────────────────────────────────────────────────────────────
 deploy-frontend:
 	cd frontend && npm run build && sudo cp -r dist/* /var/www/upload.redheadflag.com/
 
-# Deploy everything
+# ── Everything ────────────────────────────────────────────────────────────────
 deploy: deploy-backend deploy-frontend
 
-# Tail backend logs
+# ── Logs ─────────────────────────────────────────────────────────────────────
 logs:
-	docker compose logs -f backend
+	docker compose logs -f backend worker
 
-# Remove leftover temp files from inside the backend container
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+# Remove leftover temp files from the backend and worker containers
 clean-tmp:
-	docker compose exec backend find /tmp -maxdepth 1 -name "metamusic_*" -exec rm -rf {} +
+	docker compose exec backend find /tmp -maxdepth 1 \( -name "metamusic_*" -o -name "sc_dl_*" \) -exec rm -rf {} +
+	docker compose exec worker  find /tmp -maxdepth 1 \( -name "metamusic_*" -o -name "sc_dl_*" \) -exec rm -rf {} +
 	@echo "Temp files cleaned."

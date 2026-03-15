@@ -113,10 +113,27 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
             src_codec, src_kbps = await asyncio.to_thread(probe, local_src)
             if should_skip(src_codec, src_kbps):
                 logger.info(
-                    "Skipping %s — already %s at %d kbps, no re-encoding needed",
+                    "Skipping %s — already %s at %d kbps, moving to output as-is",
                     src_name, src_codec, src_kbps,
                 )
+                remote_output = input_to_output_path(remote_input, PurePosixPath(remote_input).suffix)
+                try:
+                    await asyncio.to_thread(upload_file, local_src, remote_output)
+                    logger.info("Moved (no re-encode): %s → %s", remote_input, remote_output)
+                except Exception as exc:
+                    logger.error("Move failed for %r: %s", remote_input, exc)
+                    return
+
                 _processed.add(remote_input)
+
+                if DELETE_SOURCE:
+                    try:
+                        await asyncio.to_thread(delete_input_file, remote_input)
+                        logger.info("Deleted source: %s", remote_input)
+                    except Exception as exc:
+                        logger.warning("Could not delete source %r: %s", remote_input, exc)
+
+                await asyncio.to_thread(refresh_vfs)
                 return
 
             target_bitrate = pick_bitrate(src_codec, src_kbps, FFMPEG_MAX_BITRATE)
