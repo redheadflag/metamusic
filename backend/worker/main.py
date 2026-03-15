@@ -1,19 +1,22 @@
 """
 ARQ task functions.
 
-Each function receives `ctx` (the ARQ job context) as the first argument,
-followed by the serialised request data.  Tasks run inside the ARQ worker
-process and have full access to processing.py / soundcloud/, etc.
-
-Tasks copy / download raw audio files into MUSIC_LIBRARY_PATH.
-The standalone processor service performs conversion + metadata embedding.
-After each task completes, the rclone VFS cache is refreshed so Navidrome
-picks up the new files immediately.
+After each task completes:
+  1. rclone VFS cache is refreshed so the mount sees new files.
+  2. Navidrome library scan is triggered so tracks appear immediately.
 """
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+async def _post_process() -> None:
+    """Refresh rclone VFS and trigger a Navidrome scan."""
+    from services.rclone import refresh_vfs
+    from services.navidrome import trigger_scan
+    refresh_vfs()
+    await trigger_scan()
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +28,6 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
     """Copy uploaded tracks (raw) to MUSIC_LIBRARY_PATH."""
     from models import ProcessRequest
     from processing import process_album
-    from services.rclone import refresh_vfs
 
     req = ProcessRequest(**req_dict)
 
@@ -42,7 +44,7 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
     saved = process_album(req)
     logger.info("[job %s] stored (raw): %s", ctx["job_id"], saved)
 
-    refresh_vfs()
+    await _post_process()
     return {"saved": saved}
 
 
@@ -52,10 +54,9 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
 
 async def sc_process_task(ctx, req_dict: dict) -> dict:
-    """Download SoundCloud tracks in native format and store raw."""
+    """Download SoundCloud tracks in native format and store."""
     from models import ScProcessRequest
     from processing import process_sc_album
-    from services.rclone import refresh_vfs
 
     req = ScProcessRequest(**req_dict)
 
@@ -67,7 +68,7 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
     saved = await process_sc_album(req)
     logger.info("[job %s] SC stored (raw): %s", ctx["job_id"], saved)
 
-    refresh_vfs()
+    await _post_process()
     return {"saved": saved}
 
 
@@ -80,7 +81,6 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
     """Store multiple albums' raw files in one job (e.g. from zip uploads)."""
     from models import BulkProcessRequest
     from processing import process_album, process_sc_album
-    from services.rclone import refresh_vfs
 
     req = BulkProcessRequest(**req_dict)
 
@@ -105,7 +105,7 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 
     logger.info("[job %s] bulk stored (raw): %d file(s)", ctx["job_id"], len(all_saved))
 
-    refresh_vfs()
+    await _post_process()
     return {"saved": all_saved}
 
 

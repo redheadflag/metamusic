@@ -25,6 +25,7 @@ def refresh_vfs() -> None:
     """
     url = f"{RCLONE_RC_URL}/vfs/refresh"
     try:
+        logger.info("Refreshing rclone VFS cache: POST %s?recursive=true", url)
         resp = httpx.post(url, params={"recursive": "true"}, timeout=10)
         resp.raise_for_status()
         logger.info("rclone VFS refreshed: %s", resp.json())

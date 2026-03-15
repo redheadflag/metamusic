@@ -207,26 +207,26 @@ def resolve_artist(sc_url: str) -> list[dict]:
             for t in pl.get("tracks") or []:
                 playlist_track_ids.add(t.get("id"))
 
-    loose = []
-    try:
-        tracks_data = _get(f"/users/{user_id}/tracks", {"limit": 50})
-        all_tracks = tracks_data if isinstance(tracks_data, list) else tracks_data.get("collection", [])
-        loose = [t for t in all_tracks if t.get("id") not in playlist_track_ids]
-        logger.info("Found %d loose tracks for %s", len(loose), username)
-    except Exception as e:
-        logger.warning("Could not fetch loose tracks for %s (skipping): %s", username, e)
+    # loose = []
+    # try:
+    #     tracks_data = _get(f"/users/{user_id}/tracks", {"limit": 50})
+    #     all_tracks = tracks_data if isinstance(tracks_data, list) else tracks_data.get("collection", [])
+    #     loose = [t for t in all_tracks if t.get("id") not in playlist_track_ids]
+    #     logger.info("Found %d loose tracks for %s", len(loose), username)
+    # except Exception as e:
+    #     logger.warning("Could not fetch loose tracks for %s (skipping): %s", username, e)
 
-    if loose:
-        parsed = [_parse_track(t, i + 1, len(loose)) for i, t in enumerate(loose)]
-        first = parsed[0]
-        albums.append(dict(
-            zip_name=f"{username} — loose tracks",
-            tracks=parsed,
-            artist=first["artist"],
-            album_artist=first["artist"],
-            album="",  # user will fill in
-            release_year=first["release_year"],
-            cover_art_b64=first.get("cover_art_b64"),
-        ))
+    # if loose:
+    #     parsed = [_parse_track(t, i + 1, len(loose)) for i, t in enumerate(loose)]
+    #     first = parsed[0]
+    #     albums.append(dict(
+    #         zip_name=f"{username} — loose tracks",
+    #         tracks=parsed,
+    #         artist=first["artist"],
+    #         album_artist=first["artist"],
+    #         album="",  # user will fill in
+    #         release_year=first["release_year"],
+    #         cover_art_b64=first.get("cover_art_b64"),
+    #     ))
 
     return albums

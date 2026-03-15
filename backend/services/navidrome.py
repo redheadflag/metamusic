@@ -1,9 +1,12 @@
+import logging
 import os
+
 import httpx
 
+logger = logging.getLogger(__name__)
 
-NAVIDROME_URL = os.environ["NAVIDROME_URL"].rstrip("/")
-NAVIDROME_ADMIN_USER = os.environ["NAVIDROME_ADMIN_USER"]
+NAVIDROME_URL           = os.environ["NAVIDROME_URL"].rstrip("/")
+NAVIDROME_ADMIN_USER    = os.environ["NAVIDROME_ADMIN_USER"]
 NAVIDROME_ADMIN_PASSWORD = os.environ["NAVIDROME_ADMIN_PASSWORD"]
 
 
@@ -37,3 +40,22 @@ async def create_navidrome_user(username: str, password: str) -> None:
             timeout=10,
         )
         response.raise_for_status()
+
+
+async def trigger_scan() -> None:
+    """
+    Trigger a Navidrome library scan via the REST API.
+    Non-fatal: logs a warning on failure and continues.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            token = await _get_token(client)
+            response = await client.post(
+                f"{NAVIDROME_URL}/api/scanner/trigger",
+                headers={"X-ND-Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            logger.info("Navidrome scan triggered: %s", response.json())
+    except Exception as exc:
+        logger.warning("Navidrome scan trigger failed (non-fatal): %s", exc)
