@@ -50,6 +50,15 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
     if audio is None:
         return _empty_meta(path, file_name, index)
 
+    # Duration in seconds (mutagen exposes .info.length for all formats)
+    duration: Optional[int] = None
+    try:
+        length = getattr(audio.info, "length", None)
+        if length is not None:
+            duration = int(round(length))
+    except Exception:
+        pass
+
     tags = audio.tags
     if tags is None:
         return _empty_meta(path, file_name, index)
@@ -119,16 +128,18 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         lyrics    = _vorbis("lyrics") or _vorbis("unsyncedlyrics") or None
 
     artist, title = _normalize_artists(artist, title)
+    # album_artist must always match artist — never use a separate value
     return TrackMeta(
         temp_path=path,
         file_name=file_name,
         title=title,
         artist=artist,
-        album_artist=album_artist or artist,
+        album_artist=artist,
         album=album,
         release_year=release_year,
         track_number=track_number,
         cover_art_b64=cover_art_b64,
+        duration=duration,
         composer=composer or None,
         language=language or None,
         lyrics=lyrics or None,

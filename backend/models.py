@@ -28,6 +28,7 @@ class TrackMeta(BaseModel):
     track_number: int | None = None
     cover_art_b64: str | None = None
     sc_url: str | None = None
+    duration: int | None = None
     # optional per-track tags
     lyrics: str | None = None  # USLT
     composer: str | None = None  # TCOM

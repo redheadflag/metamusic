@@ -90,7 +90,11 @@ def _parse_track(raw: dict, index: int, total: int) -> dict:
         or "Unknown Artist"
     )
     album        = pub_meta.get("album_title") or ""
-    release_year = (raw.get("created_at") or "")[:4]
+
+    # Prefer the explicit release date from publisher metadata;
+    # fall back to the track's created_at only as a last resort.
+    release_date = pub_meta.get("release_date") or pub_meta.get("p_line_for_display") or ""
+    release_year = release_date[:4] if release_date else (raw.get("created_at") or "")[:4]
 
     artwork_url  = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
     cover_bytes  = _fetch_cover_cached(artwork_url)
