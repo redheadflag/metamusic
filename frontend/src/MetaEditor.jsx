@@ -13,6 +13,13 @@ const Field = ({ label, value, onChange, required }) => (
   </div>
 );
 
+const formatDuration = (seconds) => {
+  if (seconds == null) return null;
+  const m = Math.floor(seconds / 60);
+  const s = String(seconds % 60).padStart(2, "0");
+  return `${m}:${s}`;
+};
+
 const DragHandle = () => (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
     style={{ flexShrink: 0, cursor: "grab", opacity: 0.35 }}>
@@ -267,6 +274,14 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
                 }}>
                   {r.track.file_name}
                 </span>
+                {formatDuration(r.track.duration) && (
+                  <span style={{
+                    fontSize: 11, color: "var(--text)", opacity: 0.4,
+                    whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {formatDuration(r.track.duration)}
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

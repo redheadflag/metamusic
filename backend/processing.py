@@ -61,7 +61,7 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
 
     tags = audio.tags
     if tags is None:
-        return _empty_meta(path, file_name, index)
+        return _empty_meta(path, file_name, index, duration)
 
     # ID3 (MP3): has getall(); Vorbis comment (FLAC/OGG): doesn't
     is_id3 = hasattr(tags, "getall")
@@ -146,7 +146,7 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
     )
 
 
-def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
+def _empty_meta(path: str, file_name: str, index: int, duration: Optional[int] = None) -> TrackMeta:
     return TrackMeta(
         temp_path=path,
         file_name=file_name,
@@ -156,6 +156,7 @@ def _empty_meta(path: str, file_name: str, index: int) -> TrackMeta:
         album="",
         release_year="",
         track_number=index,
+        duration=duration,
     )
 
 
@@ -177,23 +178,55 @@ def _track_filename(t: TrackMeta, is_single: bool, ext: str) -> str:
 
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Upload every track (raw, unprocessed) to
+    Embed corrected metadata into every track, then upload (raw) to
       <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
 
     Returns the list of remote paths.
     """
     from services.sftp import upload_file, unprocessed_path
+    from soundcloud.tagger import embed_tags
+    import base64
 
     if not req.album_artist:
         req = req.model_copy(update={"album_artist": req.artist})
     if req.is_single and not req.album:
         req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
+    # Decode shared album cover
+    shared_cover: Optional[bytes] = None
+    if req.cover_art_b64:
+        try:
+            shared_cover = base64.b64decode(req.cover_art_b64)
+        except Exception:
+            pass
+
     saved = []
     for t in req.tracks:
         ext         = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
         fname       = _track_filename(t, req.is_single, ext)
         remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
+
+        # Per-track cover takes priority over album cover
+        cover: Optional[bytes] = shared_cover
+        if t.cover_art_b64:
+            try:
+                cover = base64.b64decode(t.cover_art_b64)
+            except Exception:
+                pass
+
+        meta = {
+            "title":        t.title,
+            "artist":       req.artist,
+            "album_artist": req.album_artist,
+            "album":        req.album,
+            "release_year": req.release_year,
+            "track_number": t.track_number,
+        }
+
+        try:
+            embed_tags(t.temp_path, meta, cover)
+        except Exception as exc:
+            logger.warning("Could not embed tags into %s: %s", t.temp_path, exc)
 
         logger.info("Uploading via SFTP: %s → %s", os.path.basename(t.temp_path), remote_path)
         upload_file(t.temp_path, remote_path)

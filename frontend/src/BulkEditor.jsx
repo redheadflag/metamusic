@@ -1,5 +1,12 @@
 import { useState } from "react";
 
+const formatDuration = (seconds) => {
+  if (seconds == null) return null;
+  const m = Math.floor(seconds / 60);
+  const s = String(seconds % 60).padStart(2, "0");
+  return `${m}:${s}`;
+};
+
 const Field = ({ label, value, onChange, required }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
     <label style={{
@@ -150,6 +157,14 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
                     borderColor: !t.title.trim() ? "var(--danger)" : undefined,
                   }}
                 />
+                {formatDuration(t.duration) && (
+                  <span style={{
+                    fontSize: 11, color: "var(--text)", opacity: 0.4,
+                    whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {formatDuration(t.duration)}
+                  </span>
+                )}
                 <span style={{
                   fontSize: 11, color: "var(--text)", opacity: 0.35,
                   whiteSpace: "nowrap", maxWidth: 120,
