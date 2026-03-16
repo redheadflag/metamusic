@@ -35,7 +35,7 @@ logger = logging.getLogger("processor")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-POLL_INTERVAL: int   = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
+POLL_INTERVAL: int   = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
 DELETE_SOURCE: bool  = os.getenv("DELETE_SOURCE_AFTER_PROCESSING", "true").lower() == "true"
 WORKER_THREADS: int  = int(os.getenv("WORKER_THREADS", "2"))
 FFMPEG_CODEC: str    = os.getenv("FFMPEG_CODEC", "libopus")
@@ -53,10 +53,11 @@ from cloud import (          # noqa: E402
     download_file,
     upload_file,
     delete_input_file,
+    delete_output_file_if_exists,
     input_to_output_path,
     sftp as _sftp_conn,
 )
-from ffmpeg_processor import convert, probe, should_skip, pick_bitrate  # noqa: E402
+from ffmpeg_processor import convert, sanitize_tags, extract_cover, probe, should_skip, pick_bitrate  # noqa: E402
 
 # ── State: skip files already processed this session ─────────────────────────
 
@@ -92,13 +93,33 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
             src_codec, src_kbps = await asyncio.to_thread(probe, local_src)
             if should_skip(src_codec, src_kbps):
                 logger.info(
-                    "Skipping %s — already %s at %d kbps, moving to output as-is",
+                    "Skipping re-encode for %s — already %s at %d kbps; fixing tags only",
                     src_name, src_codec, src_kbps,
                 )
-                remote_output = input_to_output_path(remote_input, PurePosixPath(remote_input).suffix)
+                src_suffix = PurePosixPath(remote_input).suffix
+                # Must differ from local_src — FFmpeg refuses to overwrite its own input.
+                local_dest = os.path.join(tmp, PurePosixPath(src_name).stem + "_clean" + src_suffix)
+                remote_output = input_to_output_path(remote_input, src_suffix)
                 try:
-                    await asyncio.to_thread(upload_file, local_src, remote_output)
-                    logger.info("Moved (no re-encode): %s → %s", remote_input, remote_output)
+                    await asyncio.to_thread(sanitize_tags, local_src, local_dest)
+                except Exception as exc:
+                    logger.error("Tag sanitize failed for %r: %s", remote_input, exc)
+                    return
+                # Extract cover art to a cover.jpg alongside the output track.
+                remote_cover = input_to_output_path(remote_input, ".jpg")
+                remote_cover_dir = str(PurePosixPath(remote_cover).parent)
+                local_cover = os.path.join(tmp, "cover.jpg")
+                cover_ok = await asyncio.to_thread(extract_cover, local_src, tmp)
+                if cover_ok:
+                    remote_cover_path = remote_cover_dir + "/cover.jpg"
+                    try:
+                        await asyncio.to_thread(upload_file, local_cover, remote_cover_path)
+                        logger.info("Uploaded cover art: %s", remote_cover_path)
+                    except Exception as exc:
+                        logger.warning("Cover upload failed for %r: %s", remote_cover_path, exc)
+                try:
+                    await asyncio.to_thread(upload_file, local_dest, remote_output)
+                    logger.info("Moved (tag-fixed, no re-encode): %s → %s", remote_input, remote_output)
                 except Exception as exc:
                     logger.error("Move failed for %r: %s", remote_input, exc)
                     return
@@ -134,8 +155,26 @@ async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
                 logger.error("FFmpeg failed for %r: %s", remote_input, exc)
                 return
 
-            # 4 — Upload to output path on the same SFTP server
+            # 4 — Extract cover art and upload to output album directory
             remote_output = input_to_output_path(remote_input, FFMPEG_EXT)
+            remote_cover_dir = str(PurePosixPath(remote_output).parent)
+            local_cover = os.path.join(tmp, "cover.jpg")
+            cover_ok = await asyncio.to_thread(extract_cover, local_src, tmp)
+            if cover_ok:
+                remote_cover_path = remote_cover_dir + "/cover.jpg"
+                try:
+                    await asyncio.to_thread(upload_file, local_cover, remote_cover_path)
+                    logger.info("Uploaded cover art: %s", remote_cover_path)
+                except Exception as exc:
+                    logger.warning("Cover upload failed for %r: %s", remote_cover_path, exc)
+            # Remove any stale same-stem file with a different extension
+            # (e.g. old .m4a left over before we started converting to .opus).
+            for stale_ext in (".m4a", ".mp3", ".flac", ".ogg", ".wav", ".aiff", ".aif", ".weba", ".webm"):
+                if stale_ext == FFMPEG_EXT:
+                    continue
+                stale = input_to_output_path(remote_input, stale_ext)
+                await asyncio.to_thread(delete_output_file_if_exists, stale)
+            # Upload converted track
             try:
                 await asyncio.to_thread(upload_file, local_dest, remote_output)
                 logger.info("Uploaded: %s", remote_output)
@@ -168,6 +207,7 @@ async def poll_loop() -> None:
         SFTP_HOST, INPUT_DIR, OUTPUT_DIR, POLL_INTERVAL,
     )
 
+    # Poll immediately on startup, then wait POLL_INTERVAL between subsequent polls.
     while True:
         try:
             files = await asyncio.to_thread(list_input_files)

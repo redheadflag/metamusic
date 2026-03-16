@@ -34,7 +34,7 @@ async def close_redis() -> None:
 
 @router.post("/process", response_model=JobStatus, status_code=202)
 async def process(req: ProcessRequest):
-    """Enqueue album-processing job. Poll GET /api/jobs/{job_id} for result."""
+    """Enqueue album-processing job. Returns immediately; worker handles SFTP upload."""
     if not req.tracks:
         raise HTTPException(400, "No tracks provided")
     if not req.album and not req.is_single:
@@ -74,16 +74,7 @@ async def process_bulk(req: BulkProcessRequest):
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 async def get_job_status(job_id: str):
-    """
-    Poll a job's status.
-
-    statuses:
-      queued       — waiting in queue
-      in_progress  — worker is running it
-      complete     — finished; `result` holds the output
-      failed       — task raised an exception; `error` holds the message
-      not_found    — unknown / expired job_id
-    """
+    """Poll a job's status."""
     redis = await get_redis()
     job = arq.jobs.Job(job_id, redis)
     info = await job.info()

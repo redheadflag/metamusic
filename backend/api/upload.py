@@ -12,7 +12,17 @@ from processing import read_tags
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-UPLOAD_DIR = tempfile.mkdtemp(prefix="metamusic_")
+# Base directory for all uploads.
+# In Docker: set UPLOAD_DIR=/app/uploads, mounted as a shared volume between
+# backend and worker so the worker can read files the backend wrote.
+# Falls back to /tmp/metamusic for local dev.
+UPLOAD_BASE = os.getenv("UPLOAD_DIR", "/tmp/metamusic")
+
+
+def _ensure_upload_dir() -> str:
+    """Return the upload dir, creating it if it was wiped."""
+    os.makedirs(UPLOAD_BASE, exist_ok=True)
+    return UPLOAD_BASE
 
 
 @router.post("/upload")
@@ -21,13 +31,21 @@ async def upload(files: list[UploadFile]):
     if not files:
         raise HTTPException(400, "No files provided")
 
+    upload_dir = _ensure_upload_dir()
+    # Each upload batch gets its own subdir so concurrent requests don't collide
+    batch_dir = tempfile.mkdtemp(prefix="batch_", dir=upload_dir)
+
     results = []
     for i, file in enumerate(files, 1):
-        tmp = os.path.join(UPLOAD_DIR, f"{i:02d}_{file.filename}")
+        # Strip any path components the browser may include (Windows paths,
+        # macOS folder prefixes, etc.) so we never try to write into a
+        # nonexistent subdirectory.
+        safe_name = os.path.basename((file.filename or f"track_{i}").replace("\\", "/"))
+        tmp = os.path.join(batch_dir, f"{i:02d}_{safe_name}")
         content = await file.read()
         with open(tmp, "wb") as f:
             f.write(content)
-        meta = read_tags(tmp, file.filename or f"track_{i}.mp3", i)
+        meta = read_tags(tmp, safe_name, i)
         logger.info(
             "Uploaded [%d/%d]: %r\n"
             "  title        = %r\n"
@@ -38,7 +56,7 @@ async def upload(files: list[UploadFile]):
             "  track_number = %r\n"
             "  cover_art    = %s\n"
             "  temp_path    = %s",
-            i, len(files), file.filename,
+            i, len(files), safe_name,
             meta.title, meta.artist, meta.album_artist, meta.album,
             meta.release_year, meta.track_number,
             f"{len(meta.cover_art_b64) * 3 // 4} bytes" if meta.cover_art_b64 else "None",
@@ -54,13 +72,15 @@ async def upload_zip(files: list[UploadFile]):
     if not files:
         raise HTTPException(400, "No files provided")
 
+    upload_dir = _ensure_upload_dir()
+
     albums: list[AlbumMeta] = []
     for zf in files:
         if not (zf.filename or "").lower().endswith(".zip"):
             raise HTTPException(400, f"'{zf.filename}' is not a zip file")
 
         content = await zf.read()
-        album_dir = tempfile.mkdtemp(prefix="metamusic_zip_", dir=UPLOAD_DIR)
+        album_dir = tempfile.mkdtemp(prefix="zip_", dir=upload_dir)
 
         with zipfile.ZipFile(io.BytesIO(content)) as z:
             audio_exts = {".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aiff", ".aif"}

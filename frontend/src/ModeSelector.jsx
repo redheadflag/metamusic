@@ -45,6 +45,9 @@ export default function ModeSelector({ onSelect }) {
             textAlign: "left",
             cursor: "pointer",
             transition: "background 0.15s, border-color 0.15s",
+            width: "100%",
+            boxSizing: "border-box",
+            minWidth: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background  = "var(--accent-bg)";
@@ -56,11 +59,11 @@ export default function ModeSelector({ onSelect }) {
           }}
         >
           <span style={{ color: "var(--accent)", flexShrink: 0 }}>{m.icon}</span>
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-h)", marginBottom: 2 }}>
               {t(m.labelKey)}
             </div>
-            <div style={{ fontSize: 12, color: "var(--text)", opacity: 0.55 }}>
+            <div style={{ fontSize: 12, color: "var(--text)", opacity: 0.55, whiteSpace: "normal", wordBreak: "break-word" }}>
               {t(m.hintKey)}
             </div>
           </div>

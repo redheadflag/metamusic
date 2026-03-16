@@ -13,11 +13,13 @@ services:
       HTTPS_PROXY: socks5://host.docker.internal:1080
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
+      UPLOAD_DIR: /app/uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
       - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
+      - uploads:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -38,11 +40,13 @@ services:
       HTTPS_PROXY: socks5://host.docker.internal:1080
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
+      UPLOAD_DIR: /app/uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
       - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
+      - uploads:/app/uploads
     depends_on:
       - redis
     develop:
@@ -63,3 +67,6 @@ services:
         - action: sync+restart
           path: ./backend
           target: /app
+
+volumes:
+  uploads:

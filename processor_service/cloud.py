@@ -109,24 +109,26 @@ class SFTPConnection:
         Recursively list all files under INPUT_DIR.
         Returns absolute remote paths.
         """
+        # Hold the lock for the entire walk — _walk uses the sftp handle
+        # and must not run concurrently with other operations.
         with self._lock:
             sftp = self._ensure()
             found: list[str] = []
 
-        def _walk(remote_dir: str) -> None:
-            try:
-                entries = sftp.listdir_attr(remote_dir)
-            except IOError:
-                return
-            for entry in entries:
-                full = f"{remote_dir}/{entry.filename}"
-                if stat.S_ISDIR(entry.st_mode):
-                    _walk(full)
-                else:
-                    found.append(full)
+            def _walk(remote_dir: str) -> None:
+                try:
+                    entries = sftp.listdir_attr(remote_dir)
+                except IOError:
+                    return
+                for entry in entries:
+                    full = f"{remote_dir}/{entry.filename}"
+                    if stat.S_ISDIR(entry.st_mode):
+                        _walk(full)
+                    else:
+                        found.append(full)
 
-        _walk(INPUT_DIR)
-        return found
+            _walk(INPUT_DIR)
+            return found
 
     def download(self, remote_path: str, local_path: str) -> None:
         """Download a single file from the remote to *local_path*."""
@@ -191,6 +193,17 @@ def upload_file(local_path: str, remote_path: str) -> None:
 def delete_input_file(remote_path: str) -> None:
     """Delete a raw file from INPUT_DIR after successful processing."""
     sftp.delete(remote_path)
+
+
+def delete_output_file_if_exists(remote_path: str) -> None:
+    """Delete *remote_path* from the output tree, ignoring missing-file errors.
+    Used to remove stale same-stem files (e.g. old .m4a) before uploading
+    the newly converted version (e.g. .opus).
+    """
+    try:
+        sftp.delete(remote_path)
+    except (IOError, OSError):
+        pass  # already gone — that's fine
 
 
 def input_to_output_path(remote_input_path: str, new_ext: str) -> str:

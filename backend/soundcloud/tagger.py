@@ -143,6 +143,7 @@ def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
 
 
 def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
+    import mutagen.mp4
     from mutagen.mp4 import MP4, MP4Cover
     audio = MP4(path)
     if audio.tags is None:
@@ -156,7 +157,13 @@ def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
 
     audio["\xa9nam"] = [meta["title"]]
     audio["\xa9ART"] = [meta["artist"]]
-    audio["aART"]    = [meta["album_artist"]]
+    audio["aART"]    = [meta["album_artist"]]  # iTunes atom — read by most players
+    # Navidrome (and many other servers) groups albums by the freeform
+    # "albumartist" tag, not the iTunes aART atom.  Write both so M4A files
+    # land in the same album as any .opus/.flac siblings.
+    audio["----:com.apple.iTunes:albumartist"] = [
+        mutagen.mp4.MP4FreeForm(meta["album_artist"].encode("utf-8"))
+    ]
     audio["\xa9alb"] = [meta["album"]]
     audio["\xa9day"] = [str(meta["release_year"])]
     if meta.get("track_number") is not None:

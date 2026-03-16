@@ -22,7 +22,7 @@ const Field = ({ label, value, onChange, required }) => (
 );
 
 // collapsed is now passed in as a prop and toggled via onToggle — no internal state.
-function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove }) {
+function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove, showCodec }) {
   const { t } = useLang();
 
   const set = (key) => (v) => {
@@ -167,6 +167,20 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove 
                     {formatDuration(tr.duration)}
                   </span>
                 )}
+                {showCodec && (tr.codec || tr.bitrate) && (
+                  <span style={{
+                    fontSize: 10, color: "var(--accent)", opacity: 0.75,
+                    whiteSpace: "nowrap", flexShrink: 0,
+                    background: "var(--accent-bg)",
+                    border: "1px solid var(--accent-border)",
+                    borderRadius: 4,
+                    padding: "1px 5px",
+                    fontVariantNumeric: "tabular-nums",
+                    fontFamily: "monospace",
+                  }}>
+                    {[tr.codec, tr.bitrate ? `${tr.bitrate}k` : null].filter(Boolean).join(" · ")}
+                  </span>
+                )}
                 <span style={{
                   fontSize: 11, color: "var(--text)", opacity: 0.35,
                   whiteSpace: "nowrap", maxWidth: 120,
@@ -188,8 +202,8 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove 
 export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemove }) {
   const { t } = useLang();
   const [albums,    setAlbums]    = useState(initial);
-  // collapsed state lives here so "Collapse all" can actually control it
   const [collapsed, setCollapsed] = useState(() => initial.map(() => false));
+  const [showCodec, setShowCodec] = useState(false);
 
   function onChange(index, updated) {
     setAlbums((prev) => prev.map((a, i) => i === index ? updated : a));
@@ -239,9 +253,27 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
         }}>
           {t("albumCount", albums.length)}
         </span>
-        <button onClick={toggleAll} style={{ fontSize: 12, padding: "4px 10px" }}>
-          {allCollapsed ? t("expandAll") : t("collapseAll")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => setShowCodec((v) => !v)}
+            style={{
+              fontSize: 11, padding: "2px 8px",
+              borderRadius: 5,
+              border: "1px solid var(--border)",
+              background: showCodec ? "var(--accent-bg)" : "transparent",
+              color: showCodec ? "var(--accent)" : "var(--text)",
+              opacity: showCodec ? 1 : 0.5,
+              cursor: "pointer",
+              display: "none",
+            }}
+            className="codec-toggle"
+          >
+            codec
+          </button>
+          <button onClick={toggleAll} style={{ fontSize: 12, padding: "4px 10px" }}>
+            {allCollapsed ? t("expandAll") : t("collapseAll")}
+          </button>
+        </div>
       </div>
 
       {albums.map((a, i) => (
@@ -253,6 +285,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
           onToggle={onToggle}
           onChange={onChange}
           onRemove={handleRemove}
+          showCodec={showCodec}
         />
       ))}
 

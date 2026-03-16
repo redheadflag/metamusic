@@ -52,10 +52,37 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
 
     # Duration in seconds (mutagen exposes .info.length for all formats)
     duration: Optional[int] = None
+    codec: Optional[str] = None
+    bitrate: Optional[int] = None  # kbps
     try:
-        length = getattr(audio.info, "length", None)
+        info = audio.info
+        length = getattr(info, "length", None)
         if length is not None:
             duration = int(round(length))
+        # Bitrate: mutagen stores it in bps for most formats
+        br = getattr(info, "bitrate", None)
+        if br:
+            bitrate = int(round(br / 1000)) if br > 1000 else int(br)
+        # Codec detection by class name / mime_type
+        cls = type(audio).__name__
+        mime = getattr(audio, "mime", [])
+        mime0 = mime[0] if mime else ""
+        if "FLAC" in cls or "flac" in mime0:
+            codec = "FLAC"
+        elif "MP3" in cls or "mp3" in mime0:
+            codec = "MP3"
+        elif "OggVorbis" in cls or "ogg" in mime0 and "vorbis" in mime0:
+            codec = "OGG"
+        elif "OggOpus" in cls or "opus" in mime0:
+            codec = "Opus"
+        elif "MP4" in cls or "mp4" in mime0 or "m4a" in mime0:
+            codec = "AAC"
+        elif "Wave" in cls or "wav" in mime0:
+            codec = "WAV"
+        elif "AIFF" in cls or "aiff" in mime0:
+            codec = "AIFF"
+        elif cls:
+            codec = cls.split(".")[-1].upper()[:6]
     except Exception:
         pass
 
@@ -140,6 +167,8 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         track_number=track_number,
         cover_art_b64=cover_art_b64,
         duration=duration,
+        codec=codec,
+        bitrate=bitrate,
         composer=composer or None,
         language=language or None,
         lyrics=lyrics or None,
@@ -238,6 +267,15 @@ def process_album(req: ProcessRequest) -> list[str]:
             pass
 
         saved.append(remote_path)
+
+    # If all tracks came from a zip subdir, remove the now-empty directory
+    dirs = {os.path.dirname(t.temp_path) for t in req.tracks}
+    for d in dirs:
+        try:
+            if d and os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
+        except OSError:
+            pass
 
     return saved
 

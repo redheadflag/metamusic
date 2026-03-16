@@ -81,6 +81,8 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
   const [mode, setMode] = useState(tracks.length === 1 ? "single" : "album");
   const isSingle = mode === "single";
 
+  const [showCodec, setShowCodec] = useState(false);
+
   const [shared, setShared] = useState({
     artist:        first.artist,
     album_artist:  first.artist,
@@ -209,12 +211,31 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
 
       {/* Track list */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <span style={{
-          fontSize: 11, fontWeight: 600, color: "var(--text)",
-          textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 2,
-        }}>
-          {isSingle ? t("trackLabel") : t("tracksLabel")}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: "var(--text)",
+            textTransform: "uppercase", letterSpacing: "0.07em",
+          }}>
+            {isSingle ? t("trackLabel") : t("tracksLabel")}
+          </span>
+          {/* Codec toggle — desktop only */}
+          <button
+            onClick={() => setShowCodec((v) => !v)}
+            style={{
+              fontSize: 11, padding: "2px 8px",
+              borderRadius: 5,
+              border: "1px solid var(--border)",
+              background: showCodec ? "var(--accent-bg)" : "transparent",
+              color: showCodec ? "var(--accent)" : "var(--text)",
+              opacity: showCodec ? 1 : 0.5,
+              cursor: "pointer",
+              display: "none",
+            }}
+            className="codec-toggle"
+          >
+            codec
+          </button>
+        </div>
 
         {rows.map((r, i) => {
           const isOver = overIndex === i && dragIndex.current !== i;
@@ -279,6 +300,20 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
                   whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
                 }}>
                   {formatDuration(r.track.duration)}
+                </span>
+              )}
+              {showCodec && (r.track.codec || r.track.bitrate) && (
+                <span style={{
+                  fontSize: 10, color: "var(--accent)", opacity: 0.75,
+                  whiteSpace: "nowrap", flexShrink: 0,
+                  background: "var(--accent-bg)",
+                  border: "1px solid var(--accent-border)",
+                  borderRadius: 4,
+                  padding: "1px 5px",
+                  fontVariantNumeric: "tabular-nums",
+                  fontFamily: "monospace",
+                }}>
+                  {[r.track.codec, r.track.bitrate ? `${r.track.bitrate}k` : null].filter(Boolean).join(" · ")}
                 </span>
               )}
               <button
