@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LangProvider, useLang } from "./LangContext.jsx";
 import ModeSelector from "./ModeSelector.jsx";
 import UploadZone   from "./UploadZone.jsx";
 import ScInput      from "./ScInput.jsx";
@@ -7,7 +8,7 @@ import BulkEditor   from "./BulkEditor.jsx";
 
 const API = "/api";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function ProgressBar({ progress, label }) {
   return (
@@ -41,6 +42,47 @@ function Spinner() {
   );
 }
 
+function LangSwitcher() {
+  const { lang, setLang } = useLang();
+  return (
+    <div style={{
+      display: "flex",
+      background: "var(--code-bg)",
+      border: "1px solid var(--border)",
+      borderRadius: 7,
+      padding: 2,
+      gap: 1,
+    }}>
+      {["ru", "en"].map((l) => {
+        const active = lang === l;
+        return (
+          <button
+            key={l}
+            onClick={() => setLang(l)}
+            style={{
+              padding: "3px 9px",
+              borderRadius: 5,
+              border: "none",
+              fontSize: 12,
+              fontWeight: active ? 600 : 400,
+              background: active ? "var(--bg)" : "transparent",
+              color: active ? "var(--text-h)" : "var(--text)",
+              opacity: active ? 1 : 0.5,
+              boxShadow: active ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              transition: "all 0.15s",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {l}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function uploadWithProgress(url, formData, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -57,50 +99,38 @@ function uploadWithProgress(url, formData, onProgress) {
   });
 }
 
-/** POST to an endpoint that now returns { job_id, status }.
- *  Then polls GET /api/jobs/{job_id} every `interval` ms until complete/failed.
- *  Calls onStatus(status) on each poll so the UI can update. */
-async function enqueueAndPoll(url, body, { onStatus, interval = 1500 } = {}) {
+/** POST to an endpoint that returns { job_id, status }.
+ *  Returns job_id immediately so the caller can fire-and-forget. */
+async function enqueueJob(url, body) {
   const res = await fetch(url, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
-
   const { job_id } = await res.json();
-
-  // poll until terminal state
-  while (true) {
-    await new Promise((r) => setTimeout(r, interval));
-    const poll = await fetch(`${API}/jobs/${job_id}`);
-    if (!poll.ok) throw new Error(`Poll failed: ${poll.status}`);
-    const data = await poll.json();
-    onStatus?.(data.status);
-
-    if (data.status === "complete") return data.result;
-    if (data.status === "failed")   throw new Error(data.error || "Job failed");
-    if (data.status === "not_found") throw new Error("Job not found — it may have expired");
-    // queued / in_progress → keep polling
-  }
+  return job_id;
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ── App (inner — needs useLang) ───────────────────────────────────────────────
+
 // mode:  null | "files" | "soundcloud"
 // state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing"
-//      | "bulk-editing" | "saving" | "done" | "error"
+//      | "bulk-editing" | "saving" | "sent" | "done" | "error"
 
-export default function App() {
+function AppInner() {
+  const { t } = useLang();
+
   const [mode,      setMode]      = useState(null);
   const [state,     setState]     = useState("idle");
   const [progress,  setProgress]  = useState(0);
-  const [jobStatus, setJobStatus] = useState(null); // "queued" | "in_progress"
+  const [jobStatus, setJobStatus] = useState(null);
   const [tracks,    setTracks]    = useState([]);
   const [albums,    setAlbums]    = useState([]);
   const [saved,     setSaved]     = useState([]);
   const [error,     setError]     = useState(null);
 
-  // ── file upload ─────────────────────────────────────────────────────────
+  // ── file upload ────────────────────────────────────────────────────────
   async function handleFiles(files, type) {
     setState("uploading");
     setProgress(0);
@@ -124,7 +154,7 @@ export default function App() {
     }
   }
 
-  // ── SoundCloud fetch ────────────────────────────────────────────────────
+  // ── SoundCloud fetch ───────────────────────────────────────────────────
   async function handleScFetch(url, type) {
     setState("sc-fetching");
     setError(null);
@@ -150,7 +180,7 @@ export default function App() {
     }
   }
 
-  // ── remove album from bulk edit ─────────────────────────────────────────
+  // ── remove album from bulk edit ────────────────────────────────────────
   async function handleRemoveAlbum(album) {
     const tempPaths = (album.tracks || []).map((t) => t.temp_path).filter(Boolean);
     if (tempPaths.length === 0) return;
@@ -165,38 +195,31 @@ export default function App() {
     }
   }
 
-  // ── process single/SC album ─────────────────────────────────────────────
+  // ── submit single/SC album ────────────────────────────────────────────
+  // Fire-and-forget: switch to "sent" immediately after enqueue, don't poll.
   async function handleConfirm(meta) {
     setState("saving");
-    setJobStatus("queued");
+    setJobStatus(null);
     setError(null);
     try {
       const hasSc    = meta.tracks?.some((t) => t.sc_url);
       const endpoint = hasSc ? `${API}/sc-process` : `${API}/process`;
-      const result   = await enqueueAndPoll(endpoint, meta, {
-        onStatus: setJobStatus,
-      });
-      setSaved(result.saved);
-      setState("done");
+      await enqueueJob(endpoint, meta);
+      setState("sent");
     } catch (e) {
       setError(e.message);
       setState("error");
     }
   }
 
-  // ── process bulk albums ──────────────────────────────────────────────────
+  // ── submit bulk albums ────────────────────────────────────────────────
   async function handleBulkConfirm(albumRequests) {
     setState("saving");
-    setJobStatus("queued");
+    setJobStatus(null);
     setError(null);
     try {
-      const result = await enqueueAndPoll(
-        `${API}/process-bulk`,
-        { albums: albumRequests },
-        { onStatus: setJobStatus },
-      );
-      setSaved(result.saved);
-      setState("done");
+      await enqueueJob(`${API}/process-bulk`, { albums: albumRequests });
+      setState("sent");
     } catch (e) {
       setError(e.message);
       setState("error");
@@ -230,15 +253,21 @@ export default function App() {
         marginBottom: 40, paddingBottom: 20,
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12,
       }}>
-        <h1 style={{ cursor: mode ? "pointer" : "default" }} onClick={reset}>
-          Upload to music.redheadflag.com
+        <h1 style={{ cursor: mode ? "pointer" : "default", margin: 0 }} onClick={reset}>
+          {t("appTitle")}
         </h1>
-        {showCount && (
-          <span style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>
-            {editingCount} {state === "bulk-editing" ? "album" : "track"}{editingCount !== 1 ? "s" : ""}
-          </span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          {showCount && (
+            <span style={{ fontSize: 13, color: "var(--text)", opacity: 0.6 }}>
+              {state === "bulk-editing"
+                ? t("albumsLabel", editingCount)
+                : t("tracksLabel2", editingCount)}
+            </span>
+          )}
+          <LangSwitcher />
+        </div>
       </header>
 
       {/* Mode selection */}
@@ -263,11 +292,11 @@ export default function App() {
       )}
 
       {state === "sc-fetching" && (
-        <p style={{ color: "var(--text)", opacity: 0.5 }}>Fetching metadata from SoundCloud…</p>
+        <p style={{ color: "var(--text)", opacity: 0.5 }}>{t("fetchingSc")}</p>
       )}
 
       {/* Upload progress */}
-      {state === "uploading" && <ProgressBar progress={progress} label="Uploading…" />}
+      {state === "uploading" && <ProgressBar progress={progress} label={t("uploadingLabel")} />}
 
       {/* Editors */}
       {state === "editing" && (
@@ -277,45 +306,59 @@ export default function App() {
         <BulkEditor albums={albums} onConfirm={handleBulkConfirm} onReset={backToMode} onRemove={handleRemoveAlbum} />
       )}
 
-      {/* Job progress */}
+      {/* Submitting (brief spinner while POST is in flight) */}
       {state === "saving" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Spinner />
-            <span style={{ fontSize: 14, color: "var(--text)", opacity: 0.7 }}>
-              {jobStatus === "queued"      && "Waiting in queue…"}
-              {jobStatus === "in_progress" && "Processing tracks…"}
-              {!jobStatus                  && "Submitting job…"}
-            </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Spinner />
+          <span style={{ fontSize: 14, color: "var(--text)", opacity: 0.7 }}>
+            {t("jobSubmitting")}
+          </span>
+        </div>
+      )}
+
+      {/* Sent — job enqueued, user can go back immediately */}
+      {state === "sent" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <p style={{ color: "var(--accent)", fontWeight: 500, fontSize: 15 }}>
+            {t("jobSentTitle")}
+          </p>
+          <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.6, margin: 0 }}>
+            {t("jobSentNote")}
+          </p>
+          <div>
+            <button onClick={reset}>{t("goBack")}</button>
           </div>
-          {jobStatus === "in_progress" && (
-            <p style={{ fontSize: 12, color: "var(--text)", opacity: 0.4, margin: 0 }}>
-              This may take a few minutes for large albums or SoundCloud downloads.
-            </p>
-          )}
         </div>
       )}
 
       {state === "done" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <p style={{ color: "var(--accent)", fontWeight: 500 }}>
-            ✓ {saved.length} track{saved.length !== 1 ? "s" : ""} saved
+            {t("savedCount", saved.length)}
           </p>
           <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
             {saved.map((p, i) => (
               <li key={i} style={{ fontSize: 12, color: "var(--text)", opacity: 0.6, fontFamily: "monospace" }}>{p}</li>
             ))}
           </ul>
-          <div><button onClick={reset}>Upload more</button></div>
+          <div><button onClick={reset}>{t("uploadMore")}</button></div>
         </div>
       )}
 
       {state === "error" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <p style={{ color: "var(--danger)", fontSize: 14 }}>{error}</p>
-          <div><button onClick={reset}>Try again</button></div>
+          <div><button onClick={reset}>{t("tryAgain")}</button></div>
         </div>
       )}
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <LangProvider>
+      <AppInner />
+    </LangProvider>
   );
 }

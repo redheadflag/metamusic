@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useLang } from "./LangContext.jsx";
 
 const Field = ({ label, value, onChange, required }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -30,9 +31,10 @@ const DragHandle = () => (
 );
 
 const SegmentedControl = ({ value, onChange }) => {
+  const { t } = useLang();
   const options = [
-    { value: "single", label: "Single" },
-    { value: "album",  label: "Song from album" },
+    { value: "single", labelKey: "single" },
+    { value: "album",  labelKey: "songFromAlbum" },
   ];
   return (
     <div style={{
@@ -64,7 +66,7 @@ const SegmentedControl = ({ value, onChange }) => {
               textAlign: "center",
             }}
           >
-            {opt.label}
+            {t(opt.labelKey)}
           </button>
         );
       })}
@@ -73,6 +75,7 @@ const SegmentedControl = ({ value, onChange }) => {
 };
 
 export default function MetaEditor({ tracks, onConfirm, onReset }) {
+  const { t } = useLang();
   const first = tracks[0];
 
   const [mode, setMode] = useState(tracks.length === 1 ? "single" : "album");
@@ -109,7 +112,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         const next = [...prev];
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
-        // reassign track numbers to match new positions
         return next.map((r, i) => ({ ...r, track_number: i + 1 }));
       });
     }
@@ -155,7 +157,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-    {/* Mode toggle — only relevant when a single file is uploaded */}
       {tracks.length === 1 && <SegmentedControl value={mode} onChange={setMode} />}
 
       {/* Cover + shared fields */}
@@ -179,29 +180,28 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         </label>
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
-          <Field label="Artist" value={shared.artist} onChange={set("artist")} required />
+          <Field label={t("artistLabel")} value={shared.artist} onChange={set("artist")} required />
 
           {isSingle ? (
             <div style={{ width: "50%" }}>
-              <Field label="Year" value={shared.release_year} onChange={set("release_year")} />
+              <Field label={t("yearLabel")} value={shared.release_year} onChange={set("release_year")} />
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
-              <Field label="Album" value={shared.album}        onChange={set("album")}        required />
-              <Field label="Year"  value={shared.release_year} onChange={set("release_year")} />
+              <Field label={t("albumLabel")} value={shared.album}        onChange={set("album")}        required />
+              <Field label={t("yearLabel")}  value={shared.release_year} onChange={set("release_year")} />
             </div>
           )}
         </div>
       </div>
 
-      {/* Single hint */}
       {isSingle && (
         <div style={{
           fontSize: 12, color: "var(--text)", opacity: 0.5,
           padding: "8px 10px", borderRadius: 7,
           border: "1px solid var(--border)", background: "var(--code-bg)",
         }}>
-          Album name will be set to <em>{rows[0]?.title.trim() || "track title"} (Single)</em>
+          {t("singleHint")} <em>{rows[0]?.title.trim() || t("trackLabel")} {t("singleHintSuffix")}</em>
         </div>
       )}
 
@@ -213,98 +213,96 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
           fontSize: 11, fontWeight: 600, color: "var(--text)",
           textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 2,
         }}>
-          {isSingle ? "Track" : "Tracks"}
+          {isSingle ? t("trackLabel") : t("tracksLabel")}
         </span>
 
         {rows.map((r, i) => {
           const isOver = overIndex === i && dragIndex.current !== i;
           return (
-            <>
-              <div
-                key={r.track.temp_path}
-                draggable={!isSingle}
-                onDragStart={() => !isSingle && onDragStart(i)}
-                onDragEnter={() => !isSingle && onDragEnter(i)}
-                onDragOver={(e) => e.preventDefault()}
-                onDragEnd={onDragEnd}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "6px 8px", borderRadius: 7,
-                  border: isOver ? "1px solid var(--accent-border)" : "1px solid transparent",
-                  background: isOver ? "var(--accent-bg)" : "transparent",
-                  transition: "background 0.1s, border-color 0.1s",
-                  userSelect: "none",
-                }}
-              >
-                {!isSingle && <DragHandle />}
+            <div
+              key={r.track.temp_path}
+              draggable={!isSingle}
+              onDragStart={() => !isSingle && onDragStart(i)}
+              onDragEnter={() => !isSingle && onDragEnter(i)}
+              onDragOver={(e) => e.preventDefault()}
+              onDragEnd={onDragEnd}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "6px 8px", borderRadius: 7,
+                border: isOver ? "1px solid var(--accent-border)" : "1px solid transparent",
+                background: isOver ? "var(--accent-bg)" : "transparent",
+                transition: "background 0.1s, border-color 0.1s",
+                userSelect: "none",
+              }}
+            >
+              {!isSingle && <DragHandle />}
 
-                {!isSingle && (
-                  <input
-                    type="number"
-                    min={1}
-                    value={r.track_number}
-                    draggable={false}
-                    onDragStart={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v) && v > 0)
-                        setRows((rs) => rs.map((row, j) => j === i ? { ...row, track_number: v } : row));
-                    }}
-                    style={{ width: 64, textAlign: "center", flexShrink: 0 }}
-                  />
-                )}
-
+              {!isSingle && (
                 <input
-                  value={r.title}
-                  placeholder="Title required"
+                  type="number"
+                  min={1}
+                  value={r.track_number}
                   draggable={false}
+                  onDragStart={(e) => e.stopPropagation()}
                   onChange={(e) => {
-                    const v = e.target.value;
-                    setRows((rs) => rs.map((row, j) => j === i ? { ...row, title: v } : row));
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v > 0)
+                      setRows((rs) => rs.map((row, j) => j === i ? { ...row, track_number: v } : row));
                   }}
-                  onDragStart={(e) => e.stopPropagation()}
-                  style={{ flex: 1, borderColor: !r.title.trim() ? "var(--danger)" : undefined }}
+                  style={{ width: 64, textAlign: "center", flexShrink: 0 }}
                 />
+              )}
 
+              <input
+                value={r.title}
+                placeholder={t("titleRequired")}
+                draggable={false}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRows((rs) => rs.map((row, j) => j === i ? { ...row, title: v } : row));
+                }}
+                onDragStart={(e) => e.stopPropagation()}
+                style={{ flex: 1, borderColor: !r.title.trim() ? "var(--danger)" : undefined }}
+              />
+
+              <span style={{
+                fontSize: 11, color: "var(--text)", opacity: 0.35,
+                whiteSpace: "nowrap", maxWidth: 130,
+                overflow: "hidden", textOverflow: "ellipsis",
+                display: "var(--filename-display, inline)",
+              }}>
+                {r.track.file_name}
+              </span>
+              {formatDuration(r.track.duration) && (
                 <span style={{
-                  fontSize: 11, color: "var(--text)", opacity: 0.35,
-                  whiteSpace: "nowrap", maxWidth: 130,
-                  overflow: "hidden", textOverflow: "ellipsis",
-                  display: "var(--filename-display, inline)",
+                  fontSize: 11, color: "var(--text)", opacity: 0.4,
+                  whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
                 }}>
-                  {r.track.file_name}
+                  {formatDuration(r.track.duration)}
                 </span>
-                {formatDuration(r.track.duration) && (
-                  <span style={{
-                    fontSize: 11, color: "var(--text)", opacity: 0.4,
-                    whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
-                  }}>
-                    {formatDuration(r.track.duration)}
-                  </span>
-                )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Delete "${r.title || r.track.file_name}"?`))
-                      setRows((rs) => rs.filter((_, j) => j !== i).map((row, j) => ({ ...row, track_number: j + 1 })));
-                  }}
-                  draggable={false}
-                  onDragStart={(e) => e.stopPropagation()}
-                  style={{ fontSize: 13, padding: "2px 6px", flexShrink: 0, color: "var(--danger)", borderColor: "var(--danger)", opacity: 0.7 }}
-                >
-                  ✕
-                </button>
-              </div>
-            </>
-          )
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(t("deleteConfirm", r.title || r.track.file_name)))
+                    setRows((rs) => rs.filter((_, j) => j !== i).map((row, j) => ({ ...row, track_number: j + 1 })));
+                }}
+                draggable={false}
+                onDragStart={(e) => e.stopPropagation()}
+                style={{ fontSize: 13, padding: "2px 6px", flexShrink: 0, color: "var(--danger)", borderColor: "var(--danger)", opacity: 0.7 }}
+              >
+                ✕
+              </button>
+            </div>
+          );
         })}
       </div>
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
-        <button onClick={onReset}>← Back</button>
+        <button onClick={onReset}>{t("back")}</button>
         <button className="primary" disabled={missing} onClick={confirm} style={{ flex: 1 }}>
-          Save to library
+          {t("saveToLibrary")}
         </button>
       </div>
     </div>

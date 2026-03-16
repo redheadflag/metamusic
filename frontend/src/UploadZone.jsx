@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
+import { useLang } from "./LangContext.jsx";
 
 export default function UploadZone({ onFiles, onBack }) {
+  const { t } = useLang();
   const inputRef = useRef();
   const [dragging, setDragging] = useState(false);
 
@@ -8,8 +10,8 @@ export default function UploadZone({ onFiles, onBack }) {
     const all   = Array.from(files);
     const zips  = all.filter((f) => /\.zip$/i.test(f.name));
     const audio = all.filter((f) => f.type.startsWith("audio/") || /\.(mp3|flac|ogg|m4a|wav|aiff)$/i.test(f.name));
-    if (zips.length)        onFiles(zips,  "zip");
-    else if (audio.length)  onFiles(audio, "audio");
+    if (zips.length)       onFiles(zips,  "zip");
+    else if (audio.length) onFiles(audio, "audio");
   }
 
   return (
@@ -30,12 +32,12 @@ export default function UploadZone({ onFiles, onBack }) {
         }}
       >
         <p style={{ fontSize: 14, color: "var(--text)", opacity: 0.7, marginBottom: 6 }}>
-          Drop audio files here
+          {t("dropHere")}
         </p>
         <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.5, marginTop: 8 }}>
-          audio files or .zip albums
+          {t("dropSub")}
         </p>
-        <p style={{ fontSize: 13, color: "var(--accent)" }}>click to browse</p>
+        <p style={{ fontSize: 13, color: "var(--accent)" }}>{t("clickBrowse")}</p>
         <input
           ref={inputRef}
           type="file"
@@ -46,7 +48,7 @@ export default function UploadZone({ onFiles, onBack }) {
         />
       </div>
 
-      {onBack && <button onClick={onBack}>← Back</button>}
+      {onBack && <button onClick={onBack}>{t("back")}</button>}
     </div>
   );
 }

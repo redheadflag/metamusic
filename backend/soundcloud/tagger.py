@@ -96,6 +96,10 @@ def _embed_vorbis(path: str, meta: dict, cover: Optional[bytes], cls) -> None:
     if audio.tags is None:
         audio.add_tags()
 
+    # Clear all existing Vorbis comments so junk fields from the source
+    # (comment, description, encoder, www, contact, etc.) do not survive.
+    audio.tags.clear()
+
     audio.tags["title"]       = meta["title"]
     audio.tags["artist"]      = meta["artist"]
     audio.tags["albumartist"] = meta["album_artist"]
@@ -114,6 +118,9 @@ def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
     audio = FLAC(path)
     if audio.tags is None:
         audio.add_tags()
+
+    # Clear all existing Vorbis comments first (junk fields from source).
+    audio.tags.clear()
 
     audio.tags["title"]       = meta["title"]
     audio.tags["artist"]      = meta["artist"]
@@ -140,6 +147,12 @@ def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
     audio = MP4(path)
     if audio.tags is None:
         audio.add_tags()
+
+    # Wipe everything so no source junk leaks into the output:
+    # encoder strings (Lavf…), Telegram watermarks in comments,
+    # container-level fields (major_brand, minor_version, compatible_brands),
+    # or any other tag the original file or yt-dlp may have injected.
+    audio.tags.clear()
 
     audio["\xa9nam"] = [meta["title"]]
     audio["\xa9ART"] = [meta["artist"]]

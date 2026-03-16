@@ -7,7 +7,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    env_file: .env
+    env_file: backend/.env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
       HTTPS_PROXY: socks5://host.docker.internal:1080
@@ -32,7 +32,7 @@ services:
     build: ./backend
     restart: unless-stopped
     command: arq worker.main.WorkerSettings
-    env_file: .env
+    env_file: backend/.env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
       HTTPS_PROXY: socks5://host.docker.internal:1080
@@ -55,7 +55,7 @@ services:
     build: ./backend
     restart: unless-stopped
     command: python bot/main.py
-    env_file: .env
+    env_file: backend/.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     develop:

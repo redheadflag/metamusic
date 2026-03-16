@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLang } from "./LangContext.jsx";
 
 const formatDuration = (seconds) => {
   if (seconds == null) return null;
@@ -20,8 +21,9 @@ const Field = ({ label, value, onChange, required }) => (
   </div>
 );
 
-function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
-  const [collapsed, setCollapsed] = useState(false);
+// collapsed is now passed in as a prop and toggled via onToggle — no internal state.
+function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove }) {
+  const { t } = useLang();
 
   const set = (key) => (v) => {
     onChange(index, {
@@ -59,7 +61,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
     }}>
       {/* Header */}
       <div
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => onToggle(index)}
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "12px 16px",
@@ -77,11 +79,11 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
           )}
           <div>
             <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-h)" }}>
-              {albumMeta.artist || <span style={{ opacity: 0.4 }}>No artist</span>}
+              {albumMeta.artist || <span style={{ opacity: 0.4 }}>{t("noArtist")}</span>}
               {albumMeta.album ? ` — ${albumMeta.album}` : ""}
             </div>
             <div style={{ fontSize: 11, color: "var(--text)", opacity: 0.5 }}>
-              {albumMeta.zip_name} · {albumMeta.tracks.length} track{albumMeta.tracks.length !== 1 ? "s" : ""}
+              {albumMeta.zip_name} · {t("trackCount", albumMeta.tracks.length)}
             </div>
           </div>
         </div>
@@ -90,7 +92,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
             onClick={(e) => { e.stopPropagation(); onRemove(index); }}
             style={{ fontSize: 11, padding: "2px 8px", color: "var(--danger)", borderColor: "var(--danger)", opacity: 0.7 }}
           >
-            Remove
+            {t("removeAlbum")}
           </button>
           <span style={{ fontSize: 12, color: "var(--text)", opacity: 0.4 }}>
             {collapsed ? "▶" : "▼"}
@@ -121,10 +123,10 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
 
             <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ gridColumn: "1 / -1" }}>
-                <Field label="Artist" value={albumMeta.artist} onChange={set("artist")} required />
+                <Field label={t("artistLabel")} value={albumMeta.artist} onChange={set("artist")} required />
               </div>
-              <Field label="Album"  value={albumMeta.album}        onChange={set("album")}        required />
-              <Field label="Year"   value={albumMeta.release_year} onChange={set("release_year")} />
+              <Field label={t("albumLabel")}  value={albumMeta.album}        onChange={set("album")}        required />
+              <Field label={t("yearLabel")}   value={albumMeta.release_year} onChange={set("release_year")} />
             </div>
           </div>
 
@@ -134,14 +136,14 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
               fontSize: 11, fontWeight: 600, color: "var(--text)",
               textTransform: "uppercase", letterSpacing: "0.07em",
             }}>
-              Tracks
+              {t("tracksLabel")}
             </span>
-            {albumMeta.tracks.map((t, i) => (
-              <div key={t.temp_path} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {albumMeta.tracks.map((tr, i) => (
+              <div key={tr.temp_path} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <input
                   type="number"
                   min={1}
-                  value={t.track_number ?? i + 1}
+                  value={tr.track_number ?? i + 1}
                   onChange={(e) => {
                     const v = parseInt(e.target.value, 10);
                     if (!isNaN(v) && v > 0) setTrackNumber(i, v);
@@ -149,20 +151,20 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
                   style={{ width: 64, textAlign: "center", flexShrink: 0 }}
                 />
                 <input
-                  value={t.title}
-                  placeholder="Title required"
+                  value={tr.title}
+                  placeholder={t("titleRequired")}
                   onChange={(e) => setTitle(i, e.target.value)}
                   style={{
                     flex: 1,
-                    borderColor: !t.title.trim() ? "var(--danger)" : undefined,
+                    borderColor: !tr.title.trim() ? "var(--danger)" : undefined,
                   }}
                 />
-                {formatDuration(t.duration) && (
+                {formatDuration(tr.duration) && (
                   <span style={{
                     fontSize: 11, color: "var(--text)", opacity: 0.4,
                     whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {formatDuration(t.duration)}
+                    {formatDuration(tr.duration)}
                   </span>
                 )}
                 <span style={{
@@ -171,7 +173,7 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
                   overflow: "hidden", textOverflow: "ellipsis",
                   display: "var(--filename-display, inline)",
                 }}>
-                  {t.file_name}
+                  {tr.file_name}
                 </span>
               </div>
             ))}
@@ -184,16 +186,31 @@ function AlbumPanel({ albumMeta, index, onChange, onRemove }) {
 }
 
 export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemove }) {
-  const [albums, setAlbums] = useState(initial);
+  const { t } = useLang();
+  const [albums,    setAlbums]    = useState(initial);
+  // collapsed state lives here so "Collapse all" can actually control it
+  const [collapsed, setCollapsed] = useState(() => initial.map(() => false));
 
   function onChange(index, updated) {
     setAlbums((prev) => prev.map((a, i) => i === index ? updated : a));
   }
 
+  function onToggle(index) {
+    setCollapsed((prev) => prev.map((c, i) => i === index ? !c : c));
+  }
+
   function handleRemove(index) {
     const removed = albums[index];
-    setAlbums((prev) => prev.filter((_, i) => i !== index));
+    setAlbums((prev)    => prev.filter((_, i) => i !== index));
+    setCollapsed((prev) => prev.filter((_, i) => i !== index));
     if (onRemove) onRemove(removed);
+  }
+
+  const allCollapsed = collapsed.every(Boolean);
+
+  function toggleAll() {
+    const next = !allCollapsed;
+    setCollapsed(albums.map(() => next));
   }
 
   const anyInvalid = albums.some(
@@ -208,7 +225,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
       release_year:  a.release_year,
       cover_art_b64: a.cover_art_b64,
       is_single:     false,
-      tracks:        a.tracks.map((t, i) => ({ ...t, track_number: t.track_number ?? i + 1 })),
+      tracks:        a.tracks.map((tr, i) => ({ ...tr, track_number: tr.track_number ?? i + 1 })),
     })));
   }
 
@@ -220,24 +237,29 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
           fontSize: 11, fontWeight: 600, color: "var(--text)",
           textTransform: "uppercase", letterSpacing: "0.07em",
         }}>
-          {albums.length} album{albums.length !== 1 ? "s" : ""}
+          {t("albumCount", albums.length)}
         </span>
-        <button
-          onClick={() => setAlbums((prev) => prev.map((a) => ({ ...a, _collapsed: true })))}
-          style={{ fontSize: 12, padding: "4px 10px" }}
-        >
-          Collapse all
+        <button onClick={toggleAll} style={{ fontSize: 12, padding: "4px 10px" }}>
+          {allCollapsed ? t("expandAll") : t("collapseAll")}
         </button>
       </div>
 
       {albums.map((a, i) => (
-        <AlbumPanel key={a.zip_name + i} albumMeta={a} index={i} onChange={onChange} onRemove={handleRemove} />
+        <AlbumPanel
+          key={a.zip_name + i}
+          albumMeta={a}
+          index={i}
+          collapsed={collapsed[i]}
+          onToggle={onToggle}
+          onChange={onChange}
+          onRemove={handleRemove}
+        />
       ))}
 
       <div style={{ display: "flex", gap: 10, paddingTop: 8 }}>
-        <button onClick={onReset}>← Back</button>
+        <button onClick={onReset}>{t("back")}</button>
         <button className="primary" disabled={anyInvalid} onClick={confirm} style={{ flex: 1 }}>
-          Save all to library
+          {t("saveAllToLibrary")}
         </button>
       </div>
 

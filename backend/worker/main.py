@@ -124,6 +124,19 @@ class WorkerSettings:
 
     redis_settings = get_redis_settings()
 
-    max_tries = 2
+    # A SoundCloud artist import can easily take many minutes:
+    # ~30 s/track x 50 tracks + SFTP uploads = well over an hour.
+    # 24 h is a safe upper bound for any realistic personal-library job;
+    # if something is still running after that it has genuinely hung.
+    job_timeout = 14400  # 4 hours
+
+    # No automatic retries. SC download failures are almost always auth/
+    # network issues that won't self-heal in milliseconds, and retrying a
+    # timed-out bulk import just doubles wasted time and API quota.
+    max_tries = 1
+
+    # Keep result in Redis for 1 h after completion so the job status
+    # endpoint can still return "complete" if polled shortly after.
+    keep_result = 3600
+
     max_jobs = 2
-    job_timeout = 3600

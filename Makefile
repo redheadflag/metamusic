@@ -1,10 +1,13 @@
 .PHONY: dev deploy-frontend deploy-backend deploy logs clean-tmp check-env
 
 # ── Environment guard ─────────────────────────────────────────────────────────
-# Fail fast if required SFTP vars are missing from .env
+# .env          → compose-level vars (SFTP_KEY_FILE, ports)
+# backend/.env  → application secrets (API keys, SFTP creds, Navidrome, etc.)
 check-env:
+	@test -f .env         || { echo "ERROR: .env not found. Copy .env.example → .env and fill it in."; exit 1; }
+	@test -f backend/.env || { echo "ERROR: backend/.env not found. Copy backend/.env.example → backend/.env and fill it in."; exit 1; }
 	@for var in SFTP_HOST SFTP_USER SFTP_BASE; do \
-		grep -q "^$$var=" .env || { echo "ERROR: $$var is not set in .env"; exit 1; }; \
+		grep -q "^$$var=" backend/.env || { echo "ERROR: $$var is not set in backend/.env"; exit 1; }; \
 	done
 	@echo "Environment OK."
 
