@@ -171,7 +171,9 @@ def resolve_url(sc_url: str) -> list[dict]:
                 except Exception as e:
                     logger.warning("Could not fetch track %s: %s", t.get("id"), e)
                     continue
-            full_tracks.append(_parse_track(t, i, len(tracks_raw)))
+            full_tracks.append(
+                
+                (t, i, len(tracks_raw)))
         return full_tracks
 
     raise ValueError(f"Unsupported SoundCloud resource kind: {kind!r}")

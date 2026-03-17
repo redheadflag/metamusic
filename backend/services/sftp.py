@@ -137,5 +137,33 @@ def unprocessed_path(album_artist: str, album: str, filename: str) -> str:
     return str(PurePosixPath(UNPROCESSED_DIR) / album_artist / album / filename)
 
 
+def upload_cover(cover_bytes: bytes, album_artist: str, album: str) -> str:
+    """
+    Write *cover_bytes* as ``cover.jpg`` into the album's unprocessed folder.
+
+      → <SFTP_BASE>/unprocessed/<album_artist>/<album>/cover.jpg
+
+    Returns the remote path on success, empty string on failure (non-fatal).
+    """
+    import tempfile
+    remote_path = unprocessed_path(album_artist, album, "cover.jpg")
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+    try:
+        import os
+        os.write(tmp_fd, cover_bytes)
+        os.close(tmp_fd)
+        _conn.upload(tmp_path, remote_path)
+        return remote_path
+    except Exception as exc:
+        logger.warning("Could not upload cover.jpg: %s", exc)
+        return ""
+    finally:
+        try:
+            import os as _os
+            _os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def close() -> None:
     _conn.close()

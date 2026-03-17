@@ -133,10 +133,10 @@ class WorkerSettings:
     # No automatic retries. SC download failures are almost always auth/
     # network issues that won't self-heal in milliseconds, and retrying a
     # timed-out bulk import just doubles wasted time and API quota.
-    max_tries = 1
+    max_tries = 2
 
     # Keep result in Redis for 1 h after completion so the job status
     # endpoint can still return "complete" if polled shortly after.
     keep_result = 3600
 
-    max_jobs = 2
+    max_jobs = 4

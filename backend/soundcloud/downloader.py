@@ -6,10 +6,15 @@ The external processor service is responsible for conversion and tagging.
 """
 
 import json
+import logging
 import math
 import os
+import subprocess
+import tempfile
 
 from .utils import log, run
+
+logger = logging.getLogger(__name__)
 
 YTDLP_CONFIG = os.environ.get("YTDLP_CONFIG", "/app/config/yt-dlp.conf")
 SC_SEARCH_RESULTS = 10
@@ -23,10 +28,92 @@ def _ytdlp_base() -> list[str]:
     return cmd
 
 
+def _count_audio_streams(path: str) -> int:
+    """Return the number of audio streams in *path* via ffprobe."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=index",
+                "-of", "csv=p=0",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        logger.info("_count_audio_streams: %s → %d stream(s) (ffprobe stdout=%r stderr=%r)",
+                    os.path.basename(path), len(lines), result.stdout[:200], result.stderr[:200])
+        return len(lines)
+    except FileNotFoundError:
+        logger.warning("_count_audio_streams: ffprobe not found — skipping sanitization for %s",
+                       os.path.basename(path))
+        return 0
+
+
+def sanitize_m4a_streams(path: str) -> str:
+    """
+    If *path* is an .m4a with more than one audio stream, rewrite it so that
+    only the first audio stream (``-map 0:a:0``) is kept.  The file is
+    replaced in-place; any tags/cover already in stream 0 are preserved
+    because we use ``-c copy`` (no re-encoding).
+
+    Returns the (unchanged) path so callers can use it in a chain.
+    """
+    if not path.lower().endswith(".m4a"):
+        logger.info("sanitize_m4a_streams: skipping non-m4a file %s", os.path.basename(path))
+        return path
+
+    n_streams = _count_audio_streams(path)
+    logger.info("sanitize_m4a_streams: %s has %d audio stream(s)", os.path.basename(path), n_streams)
+    if n_streams <= 1:
+        return path
+
+    logger.info("sanitize_m4a_streams: stripping extra streams from %s", os.path.basename(path))
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".m4a", dir=os.path.dirname(path))
+    os.close(tmp_fd)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", path,
+                "-map", "0:a:0",
+                "-map", "0:v?",
+                "-c", "copy",
+                tmp_path,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning("sanitize_m4a_streams: ffmpeg failed for %s, keeping original.\nstderr: %s",
+                           os.path.basename(path), result.stderr[-500:])
+            os.unlink(tmp_path)
+            return path
+
+        os.replace(tmp_path, path)
+        logger.info("sanitize_m4a_streams: OK — %s stripped to single audio stream", os.path.basename(path))
+    except Exception as exc:
+        logger.warning("sanitize_m4a_streams: error for %s (%s), keeping original",
+                       os.path.basename(path), exc)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return path
+
+
 def download_raw(sc_url: str, tmp_dir: str) -> str:
     """
     Download the best available audio for *sc_url* into *tmp_dir*.
     Returns the path of the produced file (native format, no conversion).
+
+    For .m4a files with multiple audio streams (a common SoundCloud artefact),
+    the file is sanitized in-place so that only the first audio stream survives.
+    Cover art embedded in the container (stream 0:v) is preserved.
     Raises RuntimeError on failure.
     """
     output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
@@ -42,7 +129,10 @@ def download_raw(sc_url: str, tmp_dir: str) -> str:
     files = os.listdir(tmp_dir)
     if not files:
         raise RuntimeError("yt-dlp produced no file")
-    return os.path.join(tmp_dir, files[0])
+
+    raw_file = os.path.join(tmp_dir, files[0])
+    sanitize_m4a_streams(raw_file)   # no-op for non-m4a or single-stream files
+    return raw_file
 
 
 # ---------------------------------------------------------------------------

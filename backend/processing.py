@@ -210,10 +210,13 @@ def process_album(req: ProcessRequest) -> list[str]:
     Embed corrected metadata into every track, then upload (raw) to
       <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
 
+    Also writes cover.jpg into the same folder when cover art is present.
+
     Returns the list of remote paths.
     """
-    from services.sftp import upload_file, unprocessed_path
+    from services.sftp import upload_file, unprocessed_path, upload_cover
     from soundcloud.tagger import embed_tags
+    from soundcloud.downloader import sanitize_m4a_streams
     import base64
 
     if not req.album_artist:
@@ -253,6 +256,8 @@ def process_album(req: ProcessRequest) -> list[str]:
         }
 
         try:
+            logger.info("sanitize: checking %s (ext=%s)", os.path.basename(t.temp_path), os.path.splitext(t.temp_path)[1].lower())
+            sanitize_m4a_streams(t.temp_path)
             embed_tags(t.temp_path, meta, cover)
         except Exception as exc:
             logger.warning("Could not embed tags into %s: %s", t.temp_path, exc)
@@ -267,6 +272,22 @@ def process_album(req: ProcessRequest) -> list[str]:
             pass
 
         saved.append(remote_path)
+
+    # Upload cover.jpg into the album folder (use shared cover; fall back to
+    # the first track's individual cover if there is no shared one)
+    cover_bytes: Optional[bytes] = shared_cover
+    if cover_bytes is None and req.tracks:
+        first_track_cover = req.tracks[0].cover_art_b64
+        if first_track_cover:
+            try:
+                cover_bytes = base64.b64decode(first_track_cover)
+            except Exception:
+                pass
+    if cover_bytes:
+        cover_path = upload_cover(cover_bytes, _safe(req.album_artist), _safe(req.album))
+        if cover_path:
+            saved.append(cover_path)
+            logger.info("Uploaded cover.jpg → %s", cover_path)
 
     # If all tracks came from a zip subdir, remove the now-empty directory
     dirs = {os.path.dirname(t.temp_path) for t in req.tracks}
@@ -290,13 +311,15 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     Download SoundCloud tracks, embed metadata + cover art, then upload to
       <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
 
+    Also writes cover.jpg into the same folder when cover art is present.
+
     Returns the list of remote paths.
     """
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
     from soundcloud.tagger import embed_tags
-    from services.sftp import upload_file, unprocessed_path
+    from services.sftp import upload_file, unprocessed_path, upload_cover
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -318,6 +341,8 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             pass
 
     saved = []
+    first_cover: Optional[bytes] = None   # fallback if no shared cover
+
     for t in req.tracks:
         if not t.sc_url:
             raise ValueError(f"Missing sc_url for track '{t.title}'")
@@ -329,6 +354,9 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
                 cover = base64.b64decode(t.cover_art_b64)
             except Exception:
                 pass
+
+        if first_cover is None and cover:
+            first_cover = cover
 
         meta = {
             "title":        t.title,
@@ -356,5 +384,15 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         saved.append(remote_path)
+
+    # Upload cover.jpg into the album folder once, after all tracks
+    cover_bytes: Optional[bytes] = shared_cover or first_cover
+    if cover_bytes:
+        cover_path = await _run_in_thread(
+            upload_cover, cover_bytes, _safe(req.album_artist), _safe(req.album)
+        )
+        if cover_path:
+            saved.append(cover_path)
+            logger.info("Uploaded cover.jpg → %s", cover_path)
 
     return saved
