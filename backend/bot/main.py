@@ -4,6 +4,9 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+
 from dotenv import load_dotenv
 
 from handlers.menu import router as menu_router
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    bot = Bot(token=os.environ["BOT_TOKEN"])
+    bot = Bot(token=os.environ["BOT_TOKEN"], default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(menu_router)

@@ -27,9 +27,9 @@ async def handle_username(message: Message, state: FSMContext) -> None:
 
     if not USERNAME_RE.match(username):
         await message.answer(
-            "❌ Invalid username. Please try again.\n\n"
-            "Allowed: letters, digits, <code>-</code> <code>_</code> <code>.</code> — "
-            "between 3 and 32 characters.",
+            "Неправильное имя пользователя. Пожалуйста, попробуйте снова.\n\n"
+            "Допустимые символы: буквы, цифры, <code>-</code> <code>_</code> <code>.</code> — "
+            "от 3 до 32 символов.",
             parse_mode="HTML",
         )
         return
@@ -40,15 +40,18 @@ async def handle_username(message: Message, state: FSMContext) -> None:
     try:
         await create_navidrome_user(username, password)
     except Exception as exc:
-        await message.answer(f"⚠️ Could not create account: {exc}")
+        await message.answer(f"⚠️ Не удалось создать аккаунт: {exc}")
         return
 
     await state.clear()
     await message.answer(
-        f"✅ Account created!\n\n"
-        f"<b>Username:</b> <code>{username}</code>\n"
-        f"<b>Password:</b> <code>{password}</code>\n\n"
-        "Save these credentials — the password won't be shown again.",
+        f"✅ Аккаунт создан!\n\n"
+        f"<b>Имя пользователя:</b> <code>{username}</code>\n"
+        f"<b>Пароль:</b> <code>{password}</code>\n\n"
+        f"Сервер: <code>{os.environ.get('NAVIDROME_URL')}</code>\n\n"
+        "Ты можешь использовать эти данные для входа в сервис и начать слушать музыку!\n\n" \
+        "Список приложений которые, ты можешь скачать, находится <a href=\"https://www.navidrome.org/apps/\">здесь</a>.\n\n" \
+        "Загрузить свою музыку можно <a href=\"https://upload.redheadflag.com/\">здесь</a>.",
         parse_mode="HTML",
         reply_markup=main_menu,
     )

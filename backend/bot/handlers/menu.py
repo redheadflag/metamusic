@@ -13,7 +13,7 @@ router = Router()
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
-        "👋 Welcome! Choose an option below:",
+        "👋 Привет! Выбери команду:",
         reply_markup=main_menu,
     )
 
@@ -22,9 +22,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 async def btn_create_account(message: Message, state: FSMContext) -> None:
     await state.set_state(Registration.waiting_for_username)
     await message.answer(
-        "Please enter a username for your new Navidrome account.\n\n"
-        "Rules:\n"
-        "• 3–32 characters\n"
-        "• Letters (a–Z), digits (0–9), and <code>-</code> <code>_</code> <code>.</code> only",
-        parse_mode="HTML",
+        "Придумай имя пользователя для нового аккаунта\n\n"
+        "Оно должно содержать:\n"
+        "• 3–32 символа\n"
+        "• Только буквы (a–Z), цифры (0–9), и <code>-</code> <code>_</code> <code>.</code>",
     )
