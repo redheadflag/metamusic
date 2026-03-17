@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from keyboards import main_menu
+from keyboards import account_menu
 from services.navidrome import create_navidrome_user
 
 router = Router()
@@ -49,11 +49,10 @@ async def handle_username(message: Message, state: FSMContext) -> None:
         f"<b>Имя пользователя:</b> <code>{username}</code>\n"
         f"<b>Пароль:</b> <code>{password}</code>\n\n"
         f"Сервер: <code>{os.environ.get('NAVIDROME_URL')}</code>\n\n"
-        "Ты можешь использовать эти данные для входа в сервис и начать слушать музыку!\n\n" \
-        "Список приложений которые, ты можешь скачать, находится <a href=\"https://www.navidrome.org/apps/\">здесь</a>.\n\n" \
-        "Загрузить свою музыку можно <a href=\"https://upload.redheadflag.com/\">здесь</a>.",
+        "Ты можешь использовать эти данные для входа в сервис и начать слушать музыку!\n\n",
         parse_mode="HTML",
-        reply_markup=main_menu,
+        reply_markup=account_menu,
+        disable_web_page_preview=True
     )
 
     await _notify_admin(message.bot, message)
@@ -75,7 +74,8 @@ async def _notify_admin(bot: Bot, message: Message) -> None:
             text=(
                 f"👤 New account registered\n\n"
                 f"<b>Telegram ID:</b> <code>{user_id}</code>\n"
-                f"<b>Telegram username:</b> {username_tg}"
+                f"<b>Telegram username:</b> {username_tg}\n\n"
+                f"<b>Registered username:</b> <code>{message.text}</code>"
             ),
             parse_mode="HTML",
         )

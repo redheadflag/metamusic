@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from handlers.menu import router as menu_router
 from handlers.registration import router as registration_router
+from handlers.account_menu import router as account_menu_router
 
 load_dotenv()
 
@@ -27,6 +28,7 @@ async def main() -> None:
 
     dp.include_router(menu_router)
     dp.include_router(registration_router)
+    dp.include_router(account_menu_router)
 
     bot_info = await bot.get_me()
     logger.info("Bot @%s started successfully", bot_info.username)
