@@ -37,51 +37,15 @@ def _auth_params(username: str, password: str) -> dict:
     }
 
 
-async def _upload_and_cache(
-    bot: Bot, user_id: int, base_url: str, entry: dict, auth: dict
-) -> None:
-    """Download audio + cover art, upload as multipart to DM, cache file_id, then delete."""
-    song_id = str(entry["id"])
-    if song_id in _file_id_cache:
-        return
-
-    audio_url = f"{base_url}/rest/stream?id={song_id}&format=mp3&{urlencode(auth)}"
-    cover_art_id = entry.get("coverArt")
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(audio_url) as resp:
-            audio_bytes = await resp.read()
-
-    thumbnail = None
-    if cover_art_id:
-        cover_url = (
-            f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
-        )
-        thumbnail = URLInputFile(cover_url, filename="cover.jpg")
-
-    msg = await bot.send_audio(
-        chat_id=user_id,
-        audio=BufferedInputFile(
-            audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"
-        ),
-        thumbnail=thumbnail,
-        title=entry.get("title"),
-        performer=entry.get("artist"),
-        duration=entry.get("duration"),
-        disable_notification=True,
-    )
-    _file_id_cache[song_id] = msg.audio.file_id
-    await bot.delete_message(user_id, msg.message_id)
-
-
-async def fetch_now_playing(base_url: str, auth: dict) -> list[dict]:
+async def fetch_now_playing(base_url: str, auth: dict, username: str) -> list[dict]:
+    """Return getNowPlaying entries belonging to `username` only."""
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{base_url}/rest/getNowPlaying", params=auth) as resp:
             data = await resp.json(content_type=None)
     entries = data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
     if isinstance(entries, dict):
         entries = [entries]
-    return entries
+    return [e for e in entries if e.get("username") == username]
 
 
 async def send_audio_entry(
@@ -102,22 +66,51 @@ async def send_audio_entry(
 
     thumbnail = None
     if cover_art_id:
-        cover_url = (
-            f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
-        )
+        cover_url = f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
         thumbnail = URLInputFile(cover_url, filename="cover.jpg")
 
     msg = await bot.send_audio(
         chat_id=chat_id,
-        audio=BufferedInputFile(
-            audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"
-        ),
+        audio=BufferedInputFile(audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"),
         thumbnail=thumbnail,
         title=entry.get("title"),
         performer=entry.get("artist"),
         duration=entry.get("duration"),
     )
     _file_id_cache[song_id] = msg.audio.file_id
+
+
+async def _upload_and_cache(
+    bot: Bot, user_id: int, base_url: str, entry: dict, auth: dict
+) -> None:
+    """Pre-upload audio to a DM, cache file_id, then delete the message."""
+    song_id = str(entry["id"])
+    if song_id in _file_id_cache:
+        return
+
+    audio_url = f"{base_url}/rest/stream?id={song_id}&format=mp3&{urlencode(auth)}"
+    cover_art_id = entry.get("coverArt")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(audio_url) as resp:
+            audio_bytes = await resp.read()
+
+    thumbnail = None
+    if cover_art_id:
+        cover_url = f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
+        thumbnail = URLInputFile(cover_url, filename="cover.jpg")
+
+    msg = await bot.send_audio(
+        chat_id=user_id,
+        audio=BufferedInputFile(audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"),
+        thumbnail=thumbnail,
+        title=entry.get("title"),
+        performer=entry.get("artist"),
+        duration=entry.get("duration"),
+        disable_notification=True,
+    )
+    _file_id_cache[song_id] = msg.audio.file_id
+    await bot.delete_message(user_id, msg.message_id)
 
 
 @router.inline_query()
@@ -140,14 +133,7 @@ async def now_playing_inline(query: InlineQuery) -> None:
 
     base_url = os.environ["NAVIDROME_URL"].rstrip("/")
     auth = _auth_params(user["username"], user["password"])
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}/rest/getNowPlaying", params=auth) as resp:
-            data = await resp.json(content_type=None)
-
-    entries = data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-    if isinstance(entries, dict):
-        entries = [entries]
+    entries = await fetch_now_playing(base_url, auth, user["username"])
 
     if not entries:
         await query.answer(
@@ -172,9 +158,7 @@ async def now_playing_inline(query: InlineQuery) -> None:
 
         if song_id not in _file_id_cache:
             upload = asyncio.ensure_future(
-                _upload_and_cache(
-                    query.bot, query.from_user.id, base_url, entry, auth_entry
-                )
+                _upload_and_cache(query.bot, query.from_user.id, base_url, entry, auth_entry)
             )
             try:
                 await asyncio.wait_for(asyncio.shield(upload), timeout=5.0)

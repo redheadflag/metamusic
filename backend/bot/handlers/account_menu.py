@@ -27,7 +27,7 @@ async def handle_now_playing(message: Message):
 
     base_url = os.environ["NAVIDROME_URL"].rstrip("/")
     auth = _auth_params(user["username"], user["password"])
-    entries = await fetch_now_playing(base_url, auth)
+    entries = await fetch_now_playing(base_url, auth, user["username"])
 
     if not entries:
         await message.answer("▶️ Сейчас ничего не играет.")
