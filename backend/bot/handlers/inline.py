@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import os
 from random import random
 import secrets
@@ -83,7 +84,7 @@ async def fetch_now_playing(base_url: str, auth: dict, username: str) -> list[di
     entries = data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
     if isinstance(entries, dict):
         entries = [entries]
-    return [e for e in entries if e.get("username") == username]
+    return [e for e in entries if e.get("username", "").lower() == username.lower()]
 
 
 async def send_audio_entry(
