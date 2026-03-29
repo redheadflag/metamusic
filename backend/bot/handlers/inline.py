@@ -167,6 +167,7 @@ async def now_playing_inline(query: InlineQuery) -> None:
                 )
             ],
             cache_time=5,
+            is_personal=True,
         )
         return
 
@@ -189,6 +190,7 @@ async def now_playing_inline(query: InlineQuery) -> None:
                     )
                 ],
                 cache_time=10,
+                is_personal=True,
             )
             return
         entries = [last]
@@ -234,4 +236,4 @@ async def now_playing_inline(query: InlineQuery) -> None:
                 )
             )
 
-    await query.answer(results, cache_time=10)
+    await query.answer(results, cache_time=10, is_personal=True)
