@@ -35,8 +35,14 @@ async def sc_fetch(body: dict):
 
     results = [TrackMeta(**t) for t in tracks]
     for i, t in enumerate(results, 1):
-        logger.info("SC entry %d: title=%r artist=%r album=%r url=%s",
-                    i, t.title, t.artist, t.album, t.sc_url)
+        logger.info(
+            "SC entry %d: title=%r artist=%r album=%r url=%s",
+            i,
+            t.title,
+            t.artist,
+            t.album,
+            t.sc_url,
+        )
     return results
 
 

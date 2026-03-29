@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 async def _post_process() -> None:
     """Trigger a Navidrome scan."""
     from services.navidrome import trigger_scan
+
     await trigger_scan()
 
 
@@ -35,7 +36,10 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
     logger.info(
         "[job %s] process_album_task: artist=%r album=%r tracks=%d",
-        ctx["job_id"], req.artist, req.album, len(req.tracks),
+        ctx["job_id"],
+        req.artist,
+        req.album,
+        len(req.tracks),
     )
 
     saved = process_album(req)
@@ -59,7 +63,10 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
 
     logger.info(
         "[job %s] sc_process_task: artist=%r album=%r tracks=%d",
-        ctx["job_id"], req.artist, req.album, len(req.tracks),
+        ctx["job_id"],
+        req.artist,
+        req.album,
+        len(req.tracks),
     )
 
     saved = await process_sc_album(req)
@@ -83,7 +90,8 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 
     logger.info(
         "[job %s] process_bulk_task: %d album(s)",
-        ctx["job_id"], len(req.albums),
+        ctx["job_id"],
+        len(req.albums),
     )
 
     all_saved: list[str] = []

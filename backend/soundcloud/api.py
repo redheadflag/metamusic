@@ -12,10 +12,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SC_API         = "https://api-v2.soundcloud.com"
-SC_CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
+SC_API = "https://api-v2.soundcloud.com"
+SC_CLIENT_ID = os.environ.get("SC_CLIENT_ID", "")
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-HTTPS_PROXY    = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
+HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
 
 def _client() -> httpx.Client:
@@ -83,24 +83,28 @@ def _fetch_cover_cached(artwork_url: Optional[str]) -> Optional[bytes]:
 def _parse_track(raw: dict, index: int, total: int) -> dict:
     pub_meta = raw.get("publisher_metadata") or {}
 
-    title  = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
+    title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
     artist = (
         pub_meta.get("artist")
         or raw.get("user", {}).get("username")
         or "Unknown Artist"
     )
-    album        = pub_meta.get("album_title") or ""
+    album = pub_meta.get("album_title") or ""
 
     # Prefer the explicit release date from publisher metadata;
     # fall back to the track's created_at only as a last resort.
-    release_date = pub_meta.get("release_date") or pub_meta.get("p_line_for_display") or ""
-    release_year = release_date[:4] if release_date else (raw.get("created_at") or "")[:4]
+    release_date = (
+        pub_meta.get("release_date") or pub_meta.get("p_line_for_display") or ""
+    )
+    release_year = (
+        release_date[:4] if release_date else (raw.get("created_at") or "")[:4]
+    )
 
-    artwork_url  = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
-    cover_bytes  = _fetch_cover_cached(artwork_url)
-    cover_b64    = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+    artwork_url = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
+    cover_bytes = _fetch_cover_cached(artwork_url)
+    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
 
-    sc_url       = raw.get("permalink_url") or ""
+    sc_url = raw.get("permalink_url") or ""
     track_number = index if total > 1 else None
 
     return dict(
@@ -134,9 +138,15 @@ def _parse_playlist(playlist: dict) -> dict:
         return {}
 
     first = full_tracks[0]
-    cover_url = playlist.get("artwork_url") or (tracks_raw[0].get("artwork_url") if tracks_raw else None)
+    cover_url = playlist.get("artwork_url") or (
+        tracks_raw[0].get("artwork_url") if tracks_raw else None
+    )
     cover_bytes = _fetch_cover_cached(cover_url)
-    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else first.get("cover_art_b64")
+    cover_b64 = (
+        base64.b64encode(cover_bytes).decode()
+        if cover_bytes
+        else first.get("cover_art_b64")
+    )
 
     return dict(
         zip_name=playlist.get("permalink_url") or playlist.get("title") or "Unknown",
@@ -171,9 +181,7 @@ def resolve_url(sc_url: str) -> list[dict]:
                 except Exception as e:
                     logger.warning("Could not fetch track %s: %s", t.get("id"), e)
                     continue
-            full_tracks.append(
-                
-                (t, i, len(tracks_raw)))
+            full_tracks.append((t, i, len(tracks_raw)))
         return full_tracks
 
     raise ValueError(f"Unsupported SoundCloud resource kind: {kind!r}")
@@ -181,7 +189,11 @@ def resolve_url(sc_url: str) -> list[dict]:
 
 def _clean_artist_url(sc_url: str) -> str:
     """Strip UI-only path suffixes that the API resolve endpoint doesn't understand."""
-    return re.sub(r"/(albums|tracks|sets|likes|following|followers|reposts|spotlight)\/?$", "", sc_url.rstrip("/"))
+    return re.sub(
+        r"/(albums|tracks|sets|likes|following|followers|reposts|spotlight)\/?$",
+        "",
+        sc_url.rstrip("/"),
+    )
 
 
 def resolve_artist(sc_url: str) -> list[dict]:
@@ -199,8 +211,14 @@ def resolve_artist(sc_url: str) -> list[dict]:
     username = data.get("username") or data.get("permalink") or str(user_id)
     logger.info("Fetching artist profile: %s (id=%s)", username, user_id)
 
-    playlists_data = _get(f"/users/{user_id}/playlists", {"limit": 50, "representation": "full"})
-    playlists = playlists_data if isinstance(playlists_data, list) else playlists_data.get("collection", [])
+    playlists_data = _get(
+        f"/users/{user_id}/playlists", {"limit": 50, "representation": "full"}
+    )
+    playlists = (
+        playlists_data
+        if isinstance(playlists_data, list)
+        else playlists_data.get("collection", [])
+    )
     logger.info("Found %d playlists for %s", len(playlists), username)
 
     albums = []

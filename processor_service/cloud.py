@@ -32,20 +32,21 @@ logger = logging.getLogger("processor.sftp")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-SFTP_HOST: str  = os.environ["SFTP_HOST"]
-SFTP_PORT: int  = int(os.getenv("SFTP_PORT", "22"))
-SFTP_USER: str  = os.environ["SFTP_USER"]
-SFTP_BASE: str  = os.environ["SFTP_BASE"].rstrip("/")   # e.g. /home/user/music
+SFTP_HOST: str = os.environ["SFTP_HOST"]
+SFTP_PORT: int = int(os.getenv("SFTP_PORT", "22"))
+SFTP_USER: str = os.environ["SFTP_USER"]
+SFTP_BASE: str = os.environ["SFTP_BASE"].rstrip("/")  # e.g. /home/user/music
 
-SFTP_KEY_FILE: str | None  = os.getenv("SFTP_KEY_FILE")
-SFTP_PASSWORD: str | None  = os.getenv("SFTP_PASSWORD")
+SFTP_KEY_FILE: str | None = os.getenv("SFTP_KEY_FILE")
+SFTP_PASSWORD: str | None = os.getenv("SFTP_PASSWORD")
 
 # Derived paths
-INPUT_DIR:  str = f"{SFTP_BASE}/unprocessed"   # read raw files from here
-OUTPUT_DIR: str = SFTP_BASE                    # write processed files here
+INPUT_DIR: str = f"{SFTP_BASE}/unprocessed"  # read raw files from here
+OUTPUT_DIR: str = SFTP_BASE  # write processed files here
 
 
 # ── Persistent connection ─────────────────────────────────────────────────────
+
 
 class SFTPConnection:
     """
@@ -56,7 +57,7 @@ class SFTPConnection:
     """
 
     def __init__(self) -> None:
-        self._ssh:  paramiko.SSHClient  | None = None
+        self._ssh: paramiko.SSHClient | None = None
         self._sftp: paramiko.SFTPClient | None = None
         self._lock = threading.Lock()
 
@@ -72,7 +73,7 @@ class SFTPConnection:
             password=SFTP_PASSWORD,
             timeout=15,
         )
-        self._ssh  = ssh
+        self._ssh = ssh
         self._sftp = ssh.open_sftp()
         logger.info("SFTP connected.")
 
@@ -100,7 +101,7 @@ class SFTPConnection:
             except Exception:
                 pass
         self._sftp = None
-        self._ssh  = None
+        self._ssh = None
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -174,6 +175,7 @@ sftp = SFTPConnection()
 
 
 # ── Public API (called by main.py) ────────────────────────────────────────────
+
 
 def list_input_files() -> list[str]:
     """Return all remote file paths under INPUT_DIR."""

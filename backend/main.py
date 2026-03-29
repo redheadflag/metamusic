@@ -9,13 +9,16 @@ from api.upload import router as upload_router
 from api.jobs import router as jobs_router
 from api.soundcloud import router as sc_router
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from soundcloud.api import SC_OAUTH_TOKEN
+
     if SC_OAUTH_TOKEN:
         logger.info("SoundCloud OAuth token loaded")
     else:
@@ -27,6 +30,7 @@ async def lifespan(app: FastAPI):
     yield
     await close_redis()
     from services.sftp import close as close_sftp
+
     close_sftp()
 
 

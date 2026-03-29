@@ -33,10 +33,10 @@ import paramiko
 
 logger = logging.getLogger(__name__)
 
-SFTP_HOST: str     = os.environ["SFTP_HOST"]
-SFTP_PORT: int     = int(os.getenv("SFTP_PORT", "22"))
-SFTP_USER: str     = os.environ["SFTP_USER"]
-SFTP_BASE: str     = os.environ["SFTP_BASE"].rstrip("/")
+SFTP_HOST: str = os.environ["SFTP_HOST"]
+SFTP_PORT: int = int(os.getenv("SFTP_PORT", "22"))
+SFTP_USER: str = os.environ["SFTP_USER"]
+SFTP_BASE: str = os.environ["SFTP_BASE"].rstrip("/")
 SFTP_KEY_FILE: str | None = "/app/secrets/sftp_key"
 SFTP_PASSWORD: str | None = os.getenv("SFTP_PASSWORD")
 
@@ -52,7 +52,7 @@ class SFTPConnection:
     """
 
     def __init__(self) -> None:
-        self._ssh:  paramiko.SSHClient  | None = None
+        self._ssh: paramiko.SSHClient | None = None
         self._sftp: paramiko.SFTPClient | None = None
         self._lock = threading.Lock()
 
@@ -68,7 +68,7 @@ class SFTPConnection:
             password=SFTP_PASSWORD,
             timeout=15,
         )
-        self._ssh  = ssh
+        self._ssh = ssh
         self._sftp = ssh.open_sftp()
         logger.info("SFTP connected.")
 
@@ -92,7 +92,7 @@ class SFTPConnection:
             except Exception:
                 pass
         self._sftp = None
-        self._ssh  = None
+        self._ssh = None
 
     def _makedirs(self, sftp: paramiko.SFTPClient, remote_dir: str) -> None:
         """Recursively create *remote_dir* if it does not exist."""
@@ -146,10 +146,12 @@ def upload_cover(cover_bytes: bytes, album_artist: str, album: str) -> str:
     Returns the remote path on success, empty string on failure (non-fatal).
     """
     import tempfile
+
     remote_path = unprocessed_path(album_artist, album, "cover.jpg")
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
     try:
         import os
+
         os.write(tmp_fd, cover_bytes)
         os.close(tmp_fd)
         _conn.upload(tmp_path, remote_path)
@@ -160,6 +162,7 @@ def upload_cover(cover_bytes: bytes, album_artist: str, album: str) -> str:
     finally:
         try:
             import os as _os
+
             _os.unlink(tmp_path)
         except OSError:
             pass

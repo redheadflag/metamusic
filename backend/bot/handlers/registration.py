@@ -54,7 +54,7 @@ async def handle_username(message: Message, state: FSMContext) -> None:
         "Ты можешь использовать эти данные для входа в сервис и начать слушать музыку!\n\n",
         parse_mode="HTML",
         reply_markup=account_menu,
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
 
     await _notify_admin(message.bot, message)
@@ -63,7 +63,9 @@ async def handle_username(message: Message, state: FSMContext) -> None:
 async def _notify_admin(bot: Bot, message: Message) -> None:
     admin_id = os.environ.get("ADMIN_USER_TELEGRAM_ID")
     if not admin_id:
-        logger.warning("ADMIN_USER_TELEGRAM_ID is not set — skipping admin notification")
+        logger.warning(
+            "ADMIN_USER_TELEGRAM_ID is not set — skipping admin notification"
+        )
         return
 
     user = message.from_user

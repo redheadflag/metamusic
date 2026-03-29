@@ -7,8 +7,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-NAVIDROME_URL            = os.environ["NAVIDROME_URL"].rstrip("/")
-NAVIDROME_ADMIN_USER     = os.environ["NAVIDROME_ADMIN_USER"]
+NAVIDROME_URL = os.environ["NAVIDROME_URL"].rstrip("/")
+NAVIDROME_ADMIN_USER = os.environ["NAVIDROME_ADMIN_USER"]
 NAVIDROME_ADMIN_PASSWORD = os.environ["NAVIDROME_ADMIN_PASSWORD"]
 
 # Subsonic API version string sent with every request
@@ -22,7 +22,7 @@ def _subsonic_auth_params() -> dict:
     salt  – random hex string generated fresh for each call
     token – md5(password + salt)
     """
-    salt  = secrets.token_hex(8)
+    salt = secrets.token_hex(8)
     token = hashlib.md5((NAVIDROME_ADMIN_PASSWORD + salt).encode()).hexdigest()
     return {
         "u": NAVIDROME_ADMIN_USER,
@@ -88,11 +88,11 @@ async def trigger_scan() -> None:
             response.raise_for_status()
 
         body = response.json()
-        status = (
-            body.get("subsonic-response", {})
-                .get("scanStatus", {})
+        status = body.get("subsonic-response", {}).get("scanStatus", {})
+        logger.info(
+            "Navidrome full scan triggered: scanning=%s count=%s",
+            status.get("scanning"),
+            status.get("count"),
         )
-        logger.info("Navidrome full scan triggered: scanning=%s count=%s",
-                    status.get("scanning"), status.get("count"))
     except Exception as exc:
         logger.warning("Navidrome scan trigger failed (non-fatal): %s", exc)

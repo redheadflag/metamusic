@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import subprocess
-import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +35,18 @@ _SKIP_CODECS: frozenset[str] = frozenset({"opus"})
 _SKIP_EXTENSIONS: frozenset[str] = frozenset({".opus"})
 
 # Lossless source codecs — safe to encode at any target bitrate without extra loss.
-_LOSSLESS_CODECS: frozenset[str] = frozenset({"flac", "alac", "pcm_s16le", "pcm_s24le",
-                                               "pcm_s32le", "pcm_f32le", "wavpack", "ape"})
+_LOSSLESS_CODECS: frozenset[str] = frozenset(
+    {
+        "flac",
+        "alac",
+        "pcm_s16le",
+        "pcm_s24le",
+        "pcm_s32le",
+        "pcm_f32le",
+        "wavpack",
+        "ape",
+    }
+)
 
 
 def probe(path: str) -> tuple[str, int]:
@@ -53,17 +62,24 @@ def probe(path: str) -> tuple[str, int]:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "quiet",
-                "-print_format", "json",
-                "-show_streams", "-select_streams", "a:0",
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-select_streams",
+                "a:0",
                 "-show_format",
                 path,
             ],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-        data    = json.loads(result.stdout)
+        data = json.loads(result.stdout)
         streams = data.get("streams", [])
-        fmt     = data.get("format", {})
+        fmt = data.get("format", {})
         if streams:
             s = streams[0]
             codec = s.get("codec_name", "").lower()
@@ -111,6 +127,7 @@ def _target_ext(path: str) -> str:
 
 # ── Cover art extraction ──────────────────────────────────────────────────────
 
+
 def extract_cover(src: str, dest_dir: str) -> bool:
     """
     Extract the first embedded picture from *src* and save it as
@@ -128,11 +145,15 @@ def extract_cover(src: str, dest_dir: str) -> bool:
         return True  # already extracted for this album dir
 
     cmd = [
-        "ffmpeg", "-y",
-        "-i", src,
-        "-an",                    # no audio
-        "-vcodec", "copy",
-        "-map", "0:v:0",
+        "ffmpeg",
+        "-y",
+        "-i",
+        src,
+        "-an",  # no audio
+        "-vcodec",
+        "copy",
+        "-map",
+        "0:v:0",
         cover_path,
     ]
     try:
@@ -152,6 +173,7 @@ def extract_cover(src: str, dest_dir: str) -> bool:
 
 
 # ── Tag-only sanitise pass (for skipped files) ────────────────────────────────
+
 
 def sanitize_tags(src: str, dest: str) -> None:
     """
@@ -177,11 +199,17 @@ def sanitize_tags(src: str, dest: str) -> None:
     try:
         probe_result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", src],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         tags = json.loads(probe_result.stdout).get("format", {}).get("tags", {})
         album_artist = next(
-            (v for k, v in tags.items() if k.lower() in ("album_artist", "albumartist")),
+            (
+                v
+                for k, v in tags.items()
+                if k.lower() in ("album_artist", "albumartist")
+            ),
             None,
         )
         if album_artist:
@@ -195,12 +223,18 @@ def sanitize_tags(src: str, dest: str) -> None:
     # cover art here — Navidrome will fall back to folder.jpg/cover.jpg in
     # the same directory, which is the recommended layout anyway.
     cmd = [
-        "ffmpeg", "-y",
-        "-i", src,
-        "-map", "0:a:0",     # audio only — skip broken cover-art stream
-        "-c:a", "copy",
-        "-map_metadata", "0",
-        "-metadata", "encoder=",
+        "ffmpeg",
+        "-y",
+        "-i",
+        src,
+        "-map",
+        "0:a:0",  # audio only — skip broken cover-art stream
+        "-c:a",
+        "copy",
+        "-map_metadata",
+        "0",
+        "-metadata",
+        "encoder=",
         *album_artist_opts,
         *id3_opts,
         dest,
@@ -208,7 +242,8 @@ def sanitize_tags(src: str, dest: str) -> None:
 
     logger.info(
         "sanitize_tags: %s -> %s (stream-copy, audio-only tag fix)",
-        os.path.basename(src), os.path.basename(dest),
+        os.path.basename(src),
+        os.path.basename(dest),
     )
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -217,6 +252,7 @@ def sanitize_tags(src: str, dest: str) -> None:
 
 
 # ── Main conversion ───────────────────────────────────────────────────────────
+
 
 def convert(
     src: str,
@@ -235,15 +271,17 @@ def convert(
     target_bitrate : exact output bitrate in kbps — caller is responsible for
                      computing this via pick_bitrate() before calling convert()
     """
-    dest_ext   = _target_ext(dest)
-    src_ext    = _target_ext(src)
+    dest_ext = _target_ext(dest)
+    src_ext = _target_ext(src)
 
     # Stream-copy when already in the right container and bitrate; this path is
     # hit rarely now that should_skip() gates most same-format files upstream,
     # but kept as a safety net.
     src_codec, src_kbps = probe(src)
-    can_copy   = (src_ext == dest_ext) and (src_kbps > 0) and (src_kbps <= target_bitrate)
-    audio_opts = ["-c:a", "copy"] if can_copy else ["-c:a", codec, "-b:a", f"{target_bitrate}k"]
+    can_copy = (src_ext == dest_ext) and (src_kbps > 0) and (src_kbps <= target_bitrate)
+    audio_opts = (
+        ["-c:a", "copy"] if can_copy else ["-c:a", codec, "-b:a", f"{target_bitrate}k"]
+    )
 
     # -id3v2_version 3 is only valid for MP3 (ID3 container).  Passing it for
     # M4A or Opus silently corrupts or drops tags — including the duration atom
@@ -255,14 +293,29 @@ def convert(
     # junk (major_brand, compatible_brands, encoder=Lavf…, Telegram
     # comment, etc.) that pollutes the output and confuses Navidrome.
     # Cherry-picking gives us a clean, predictable tag set.
-    _WANTED = ("title", "artist", "album", "album_artist", "albumartist",
-               "track", "tracknumber", "disc", "discnumber", "date", "year",
-               "genre", "composer", "lyrics")
+    _WANTED = (
+        "title",
+        "artist",
+        "album",
+        "album_artist",
+        "albumartist",
+        "track",
+        "tracknumber",
+        "disc",
+        "discnumber",
+        "date",
+        "year",
+        "genre",
+        "composer",
+        "lyrics",
+    )
     meta_opts: list[str] = []
     try:
         probe_result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", src],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         tags = json.loads(probe_result.stdout).get("format", {}).get("tags", {})
         # Normalise keys to lower-case and keep only wanted tags.
@@ -279,11 +332,15 @@ def convert(
         pass
 
     cmd = [
-        "ffmpeg", "-y",
-        "-i", src,
-        "-map", "0:a:0",     # audio only — cover art written as cover.jpg separately
+        "ffmpeg",
+        "-y",
+        "-i",
+        src,
+        "-map",
+        "0:a:0",  # audio only — cover art written as cover.jpg separately
         *audio_opts,
-        "-map_metadata", "-1",   # start with empty tags, then add only what we want
+        "-map_metadata",
+        "-1",  # start with empty tags, then add only what we want
         *meta_opts,
         *id3_opts,
         dest,

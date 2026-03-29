@@ -28,7 +28,10 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     init_db()
 
-    bot = Bot(token=os.environ["BOT_TOKEN"], default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(
+        token=os.environ["BOT_TOKEN"],
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(menu_router)

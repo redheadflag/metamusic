@@ -95,8 +95,8 @@ async def get_job_status(job_id: str):
         return JobStatus(job_id=job_id, status="not_found")
 
     status_map = {
-        arq.jobs.JobStatus.queued:      "queued",
-        arq.jobs.JobStatus.deferred:    "queued",
+        arq.jobs.JobStatus.queued: "queued",
+        arq.jobs.JobStatus.deferred: "queued",
         arq.jobs.JobStatus.in_progress: "in_progress",
     }
     return JobStatus(job_id=job_id, status=status_map.get(arq_status, "queued"))

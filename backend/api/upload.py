@@ -56,10 +56,18 @@ async def upload(files: list[UploadFile]):
             "  track_number = %r\n"
             "  cover_art    = %s\n"
             "  temp_path    = %s",
-            i, len(files), safe_name,
-            meta.title, meta.artist, meta.album_artist, meta.album,
-            meta.release_year, meta.track_number,
-            f"{len(meta.cover_art_b64) * 3 // 4} bytes" if meta.cover_art_b64 else "None",
+            i,
+            len(files),
+            safe_name,
+            meta.title,
+            meta.artist,
+            meta.album_artist,
+            meta.album,
+            meta.release_year,
+            meta.track_number,
+            f"{len(meta.cover_art_b64) * 3 // 4} bytes"
+            if meta.cover_art_b64
+            else "None",
             meta.temp_path,
         )
         results.append(meta)
@@ -85,7 +93,8 @@ async def upload_zip(files: list[UploadFile]):
         with zipfile.ZipFile(io.BytesIO(content)) as z:
             audio_exts = {".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aiff", ".aif"}
             members = sorted(
-                m for m in z.namelist()
+                m
+                for m in z.namelist()
                 if not m.startswith("__MACOSX")
                 and os.path.splitext(m.lower())[1] in audio_exts
             )
@@ -95,7 +104,7 @@ async def upload_zip(files: list[UploadFile]):
             extracted = []
             for i, member in enumerate(members, 1):
                 fname = os.path.basename(member)
-                dest  = os.path.join(album_dir, f"{i:02d}_{fname}")
+                dest = os.path.join(album_dir, f"{i:02d}_{fname}")
                 with z.open(member) as src, open(dest, "wb") as dst:
                     dst.write(src.read())
                 extracted.append((i, fname, dest))
@@ -103,20 +112,28 @@ async def upload_zip(files: list[UploadFile]):
         tracks: list[TrackMeta] = []
         for i, fname, path in extracted:
             meta = read_tags(path, fname, i)
-            logger.info("zip %r track %d: title=%r artist=%r album=%r",
-                        zf.filename, i, meta.title, meta.artist, meta.album)
+            logger.info(
+                "zip %r track %d: title=%r artist=%r album=%r",
+                zf.filename,
+                i,
+                meta.title,
+                meta.artist,
+                meta.album,
+            )
             tracks.append(meta)
 
         first = tracks[0]
-        albums.append(AlbumMeta(
-            zip_name=zf.filename or "archive.zip",
-            tracks=tracks,
-            artist=first.artist,
-            album_artist=first.album_artist or first.artist,
-            album=first.album,
-            release_year=first.release_year,
-            cover_art_b64=first.cover_art_b64,
-        ))
+        albums.append(
+            AlbumMeta(
+                zip_name=zf.filename or "archive.zip",
+                tracks=tracks,
+                artist=first.artist,
+                album_artist=first.album_artist or first.artist,
+                album=first.album,
+                release_year=first.release_year,
+                cover_art_b64=first.cover_art_b64,
+            )
+        )
     return albums
 
 
@@ -124,6 +141,7 @@ async def upload_zip(files: list[UploadFile]):
 async def cancel_tracks(body: dict):
     """Remove temp files for tracks the user excluded from batch processing."""
     import shutil
+
     temp_paths = body.get("temp_paths") or []
     removed = []
     for p in temp_paths:

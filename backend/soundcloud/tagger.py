@@ -58,8 +58,10 @@ def _vorbis_picture_block(cover: bytes) -> str:
     # Picture type 3 = Front Cover
     block = (
         struct.pack(">I", 3)
-        + struct.pack(">I", len(mime)) + mime
-        + struct.pack(">I", len(desc)) + desc
+        + struct.pack(">I", len(mime))
+        + mime
+        + struct.pack(">I", len(desc))
+        + desc
         + struct.pack(">IIIII", 0, 0, 0, 0, len(cover))
         + cover
     )
@@ -68,9 +70,17 @@ def _vorbis_picture_block(cover: bytes) -> str:
 
 def _embed_id3(path: str, meta: dict, cover: Optional[bytes]) -> None:
     from mutagen.id3 import (
-        ID3, ID3NoHeaderError,
-        TIT2, TPE1, TPE2, TALB, TDRC, TRCK, APIC,
+        ID3,
+        ID3NoHeaderError,
+        TIT2,
+        TPE1,
+        TPE2,
+        TALB,
+        TDRC,
+        TRCK,
+        APIC,
     )
+
     try:
         tags = ID3(path)
     except ID3NoHeaderError:
@@ -100,11 +110,11 @@ def _embed_vorbis(path: str, meta: dict, cover: Optional[bytes], cls) -> None:
     # (comment, description, encoder, www, contact, etc.) do not survive.
     audio.tags.clear()
 
-    audio.tags["title"]       = meta["title"]
-    audio.tags["artist"]      = meta["artist"]
+    audio.tags["title"] = meta["title"]
+    audio.tags["artist"] = meta["artist"]
     audio.tags["albumartist"] = meta["album_artist"]
-    audio.tags["album"]       = meta["album"]
-    audio.tags["date"]        = str(meta["release_year"])
+    audio.tags["album"] = meta["album"]
+    audio.tags["date"] = str(meta["release_year"])
     if meta.get("track_number") is not None:
         audio.tags["tracknumber"] = str(meta["track_number"])
     if cover:
@@ -115,6 +125,7 @@ def _embed_vorbis(path: str, meta: dict, cover: Optional[bytes], cls) -> None:
 
 def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
     from mutagen.flac import FLAC, Picture
+
     audio = FLAC(path)
     if audio.tags is None:
         audio.add_tags()
@@ -122,11 +133,11 @@ def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
     # Clear all existing Vorbis comments first (junk fields from source).
     audio.tags.clear()
 
-    audio.tags["title"]       = meta["title"]
-    audio.tags["artist"]      = meta["artist"]
+    audio.tags["title"] = meta["title"]
+    audio.tags["artist"] = meta["artist"]
     audio.tags["albumartist"] = meta["album_artist"]
-    audio.tags["album"]       = meta["album"]
-    audio.tags["date"]        = str(meta["release_year"])
+    audio.tags["album"] = meta["album"]
+    audio.tags["date"] = str(meta["release_year"])
     if meta.get("track_number") is not None:
         audio.tags["tracknumber"] = str(meta["track_number"])
 
@@ -145,6 +156,7 @@ def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
 def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
     import mutagen.mp4
     from mutagen.mp4 import MP4, MP4Cover
+
     audio = MP4(path)
     if audio.tags is None:
         audio.add_tags()
@@ -157,7 +169,7 @@ def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
 
     audio["\xa9nam"] = [meta["title"]]
     audio["\xa9ART"] = [meta["artist"]]
-    audio["aART"]    = [meta["album_artist"]]  # iTunes atom — read by most players
+    audio["aART"] = [meta["album_artist"]]  # iTunes atom — read by most players
     # Navidrome (and many other servers) groups albums by the freeform
     # "albumartist" tag, not the iTunes aART atom.  Write both so M4A files
     # land in the same album as any .opus/.flac siblings.
@@ -169,7 +181,9 @@ def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
     if meta.get("track_number") is not None:
         audio["trkn"] = [(int(meta["track_number"]), 0)]
     if cover:
-        fmt = MP4Cover.FORMAT_PNG if _mime(cover) == "image/png" else MP4Cover.FORMAT_JPEG
+        fmt = (
+            MP4Cover.FORMAT_PNG if _mime(cover) == "image/png" else MP4Cover.FORMAT_JPEG
+        )
         audio["covr"] = [MP4Cover(cover, imageformat=fmt)]
 
     audio.save()
@@ -194,8 +208,12 @@ def embed_tags(path: str, meta: dict, cover: Optional[bytes]) -> None:
 
     logger.info(
         "Tagging %s: title=%r artist=%r album=%r track=%s cover=%s",
-        path, meta.get("title"), meta.get("artist"), meta.get("album"),
-        meta.get("track_number"), f"{len(cover)} bytes" if cover else "none",
+        path,
+        meta.get("title"),
+        meta.get("artist"),
+        meta.get("album"),
+        meta.get("track_number"),
+        f"{len(cover)} bytes" if cover else "none",
     )
 
     try:
@@ -205,20 +223,25 @@ def embed_tags(path: str, meta: dict, cover: Optional[bytes]) -> None:
             _embed_flac(path, meta, cover)
         elif ext == "ogg":
             from mutagen.oggvorbis import OggVorbis
+
             _embed_vorbis(path, meta, cover, OggVorbis)
         elif ext == "opus":
             from mutagen.oggopus import OggOpus
+
             _embed_vorbis(path, meta, cover, OggOpus)
         elif ext in ("m4a", "mp4", "aac"):
             _embed_mp4(path, meta, cover)
         else:
             # Best-effort: let mutagen auto-detect
             from mutagen import File as MutagenFile
+
             audio = MutagenFile(path, easy=False)
             if audio is None:
                 logger.warning("mutagen could not open %s — skipping tag write", path)
                 return
-            logger.warning("Unknown extension .%s — attempting generic mutagen write", ext)
+            logger.warning(
+                "Unknown extension .%s — attempting generic mutagen write", ext
+            )
             _embed_id3(path, meta, cover)  # last resort
     except Exception as exc:
         logger.error("Failed to embed tags into %s: %s", path, exc)

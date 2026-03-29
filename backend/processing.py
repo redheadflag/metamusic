@@ -102,10 +102,10 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         return str(val[0]).strip() if val else ""
 
     if is_id3:
-        title        = _id3("TIT2")
-        artist       = _id3("TPE1")
+        title = _id3("TIT2")
+        artist = _id3("TPE1")
         album_artist = _id3("TPE2")
-        album        = _id3("TALB")
+        album = _id3("TALB")
         release_year = _id3("TDRC")
 
         track_number = index
@@ -121,8 +121,8 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         if apic_keys:
             cover_art_b64 = base64.b64encode(tags[apic_keys[0]].data).decode()
 
-        composer     = _id3("TCOM")
-        language     = _id3("TLAN")
+        composer = _id3("TCOM")
+        language = _id3("TLAN")
         lyrics_frame = tags.get("USLT::")
         if lyrics_frame is None:
             uslt_keys = [k for k in tags.keys() if k.startswith("USLT")]
@@ -131,10 +131,12 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
 
     else:
         # Vorbis comment (FLAC, OGG, Opus…)
-        title        = _vorbis("title")
-        artist       = ", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()) or ""
+        title = _vorbis("title")
+        artist = (
+            ", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()) or ""
+        )
         album_artist = _vorbis("albumartist")
-        album        = _vorbis("album")
+        album = _vorbis("album")
         release_year = _vorbis("date")
 
         track_number = index
@@ -150,9 +152,9 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         if pictures:
             cover_art_b64 = base64.b64encode(pictures[0].data).decode()
 
-        composer  = _vorbis("composer")
-        language  = _vorbis("language")
-        lyrics    = _vorbis("lyrics") or _vorbis("unsyncedlyrics") or None
+        composer = _vorbis("composer")
+        language = _vorbis("language")
+        lyrics = _vorbis("lyrics") or _vorbis("unsyncedlyrics") or None
 
     artist, title = _normalize_artists(artist, title)
     # album_artist must always match artist — never use a separate value
@@ -175,7 +177,9 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
     )
 
 
-def _empty_meta(path: str, file_name: str, index: int, duration: Optional[int] = None) -> TrackMeta:
+def _empty_meta(
+    path: str, file_name: str, index: int, duration: Optional[int] = None
+) -> TrackMeta:
     return TrackMeta(
         temp_path=path,
         file_name=file_name,
@@ -234,8 +238,8 @@ def process_album(req: ProcessRequest) -> list[str]:
 
     saved = []
     for t in req.tracks:
-        ext         = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
-        fname       = _track_filename(t, req.is_single, ext)
+        ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
+        fname = _track_filename(t, req.is_single, ext)
         remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
 
         # Per-track cover takes priority over album cover
@@ -247,22 +251,28 @@ def process_album(req: ProcessRequest) -> list[str]:
                 pass
 
         meta = {
-            "title":        t.title,
-            "artist":       req.artist,
+            "title": t.title,
+            "artist": req.artist,
             "album_artist": req.album_artist,
-            "album":        req.album,
+            "album": req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
         }
 
         try:
-            logger.info("sanitize: checking %s (ext=%s)", os.path.basename(t.temp_path), os.path.splitext(t.temp_path)[1].lower())
+            logger.info(
+                "sanitize: checking %s (ext=%s)",
+                os.path.basename(t.temp_path),
+                os.path.splitext(t.temp_path)[1].lower(),
+            )
             sanitize_m4a_streams(t.temp_path)
             embed_tags(t.temp_path, meta, cover)
         except Exception as exc:
             logger.warning("Could not embed tags into %s: %s", t.temp_path, exc)
 
-        logger.info("Uploading via SFTP: %s → %s", os.path.basename(t.temp_path), remote_path)
+        logger.info(
+            "Uploading via SFTP: %s → %s", os.path.basename(t.temp_path), remote_path
+        )
         upload_file(t.temp_path, remote_path)
 
         # Clean up local temp file after successful upload
@@ -284,7 +294,9 @@ def process_album(req: ProcessRequest) -> list[str]:
             except Exception:
                 pass
     if cover_bytes:
-        cover_path = upload_cover(cover_bytes, _safe(req.album_artist), _safe(req.album))
+        cover_path = upload_cover(
+            cover_bytes, _safe(req.album_artist), _safe(req.album)
+        )
         if cover_path:
             saved.append(cover_path)
             logger.info("Uploaded cover.jpg → %s", cover_path)
@@ -341,7 +353,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             pass
 
     saved = []
-    first_cover: Optional[bytes] = None   # fallback if no shared cover
+    first_cover: Optional[bytes] = None  # fallback if no shared cover
 
     for t in req.tracks:
         if not t.sc_url:
@@ -359,10 +371,10 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             first_cover = cover
 
         meta = {
-            "title":        t.title,
-            "artist":       t.artist or req.artist,
+            "title": t.title,
+            "artist": t.artist or req.artist,
             "album_artist": req.album_artist,
-            "album":        req.album,
+            "album": req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
         }
@@ -372,9 +384,11 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             logger.info("Downloading SC track: %r", t.sc_url)
             raw_file = await _run_in_thread(download_raw, t.sc_url, tmp_dir)
 
-            ext   = os.path.splitext(raw_file)[1]
+            ext = os.path.splitext(raw_file)[1]
             fname = _track_filename(t, req.is_single, ext)
-            remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
+            remote_path = unprocessed_path(
+                _safe(req.album_artist), _safe(req.album), fname
+            )
 
             embed_tags(raw_file, meta, cover)
 

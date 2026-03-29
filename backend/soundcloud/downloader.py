@@ -33,22 +33,34 @@ def _count_audio_streams(path: str) -> int:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error",
-                "-select_streams", "a",
-                "-show_entries", "stream=index",
-                "-of", "csv=p=0",
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
                 path,
             ],
             capture_output=True,
             text=True,
         )
         lines = [l for l in result.stdout.splitlines() if l.strip()]
-        logger.info("_count_audio_streams: %s → %d stream(s) (ffprobe stdout=%r stderr=%r)",
-                    os.path.basename(path), len(lines), result.stdout[:200], result.stderr[:200])
+        logger.info(
+            "_count_audio_streams: %s → %d stream(s) (ffprobe stdout=%r stderr=%r)",
+            os.path.basename(path),
+            len(lines),
+            result.stdout[:200],
+            result.stderr[:200],
+        )
         return len(lines)
     except FileNotFoundError:
-        logger.warning("_count_audio_streams: ffprobe not found — skipping sanitization for %s",
-                       os.path.basename(path))
+        logger.warning(
+            "_count_audio_streams: ffprobe not found — skipping sanitization for %s",
+            os.path.basename(path),
+        )
         return 0
 
 
@@ -62,42 +74,64 @@ def sanitize_m4a_streams(path: str) -> str:
     Returns the (unchanged) path so callers can use it in a chain.
     """
     if not path.lower().endswith(".m4a"):
-        logger.info("sanitize_m4a_streams: skipping non-m4a file %s", os.path.basename(path))
+        logger.info(
+            "sanitize_m4a_streams: skipping non-m4a file %s", os.path.basename(path)
+        )
         return path
 
     n_streams = _count_audio_streams(path)
-    logger.info("sanitize_m4a_streams: %s has %d audio stream(s)", os.path.basename(path), n_streams)
+    logger.info(
+        "sanitize_m4a_streams: %s has %d audio stream(s)",
+        os.path.basename(path),
+        n_streams,
+    )
     if n_streams <= 1:
         return path
 
-    logger.info("sanitize_m4a_streams: stripping extra streams from %s", os.path.basename(path))
+    logger.info(
+        "sanitize_m4a_streams: stripping extra streams from %s", os.path.basename(path)
+    )
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".m4a", dir=os.path.dirname(path))
     os.close(tmp_fd)
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-i", path,
-                "-map", "0:a:0",
-                "-map", "0:v?",
-                "-c", "copy",
+                "ffmpeg",
+                "-y",
+                "-i",
+                path,
+                "-map",
+                "0:a:0",
+                "-map",
+                "0:v?",
+                "-c",
+                "copy",
                 tmp_path,
             ],
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            logger.warning("sanitize_m4a_streams: ffmpeg failed for %s, keeping original.\nstderr: %s",
-                           os.path.basename(path), result.stderr[-500:])
+            logger.warning(
+                "sanitize_m4a_streams: ffmpeg failed for %s, keeping original.\nstderr: %s",
+                os.path.basename(path),
+                result.stderr[-500:],
+            )
             os.unlink(tmp_path)
             return path
 
         os.replace(tmp_path, path)
-        logger.info("sanitize_m4a_streams: OK — %s stripped to single audio stream", os.path.basename(path))
+        logger.info(
+            "sanitize_m4a_streams: OK — %s stripped to single audio stream",
+            os.path.basename(path),
+        )
     except Exception as exc:
-        logger.warning("sanitize_m4a_streams: error for %s (%s), keeping original",
-                       os.path.basename(path), exc)
+        logger.warning(
+            "sanitize_m4a_streams: error for %s (%s), keeping original",
+            os.path.basename(path),
+            exc,
+        )
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -117,13 +151,19 @@ def download_raw(sc_url: str, tmp_dir: str) -> str:
     Raises RuntimeError on failure.
     """
     output_tmpl = os.path.join(tmp_dir, "%(id)s.%(ext)s")
-    result = run(_ytdlp_base() + [
-        "--no-playlist",
-        "--format", "bestaudio/best",
-        "--no-embed-metadata", "--no-embed-thumbnail",
-        "--output", output_tmpl,
-        sc_url,
-    ])
+    result = run(
+        _ytdlp_base()
+        + [
+            "--no-playlist",
+            "--format",
+            "bestaudio/best",
+            "--no-embed-metadata",
+            "--no-embed-thumbnail",
+            "--output",
+            output_tmpl,
+            sc_url,
+        ]
+    )
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr[-500:]}")
     files = os.listdir(tmp_dir)
@@ -131,13 +171,14 @@ def download_raw(sc_url: str, tmp_dir: str) -> str:
         raise RuntimeError("yt-dlp produced no file")
 
     raw_file = os.path.join(tmp_dir, files[0])
-    sanitize_m4a_streams(raw_file)   # no-op for non-m4a or single-stream files
+    sanitize_m4a_streams(raw_file)  # no-op for non-m4a or single-stream files
     return raw_file
 
 
 # ---------------------------------------------------------------------------
 # Search helpers (used by CLI / batch flows)
 # ---------------------------------------------------------------------------
+
 
 def _normalize(s: str) -> str:
     """Lowercase and strip typographic quotes for fuzzy comparison."""
@@ -150,7 +191,8 @@ def _ytdlp_search(query: str, n: int = SC_SEARCH_RESULTS) -> list[dict]:
     search_url = f"scsearch{n}:{query}"
     log(f"  SC search: {search_url!r}")
     result = run(
-        _ytdlp_base() + [
+        _ytdlp_base()
+        + [
             "--dump-json",
             "--flat-playlist",
             "--no-playlist",
@@ -214,7 +256,8 @@ def fetch_entries(sc_url: str) -> list[dict]:
     """
     log(f"Fetching SoundCloud entries for: {sc_url}")
     result = run(
-        _ytdlp_base() + [
+        _ytdlp_base()
+        + [
             "--dump-json",
             "--yes-playlist",
             "--skip-download",
@@ -232,7 +275,9 @@ def fetch_entries(sc_url: str) -> list[dict]:
             pass
 
     if not entries:
-        raise RuntimeError(f"yt-dlp returned no entries for SoundCloud URL.\n{result.stderr}")
+        raise RuntimeError(
+            f"yt-dlp returned no entries for SoundCloud URL.\n{result.stderr}"
+        )
 
     log(f"Found {len(entries)} SC entry/entries.")
     return entries
@@ -244,7 +289,9 @@ def fetch_full_track_info(track: dict) -> dict:
     if not url:
         return track
     log(f"Fetching full SC track info: {url}")
-    result = run(_ytdlp_base() + ["--dump-json", "--no-playlist", "--skip-download", url])
+    result = run(
+        _ytdlp_base() + ["--dump-json", "--no-playlist", "--skip-download", url]
+    )
     if result.returncode != 0:
         return track
     try:

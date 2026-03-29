@@ -54,12 +54,16 @@ async def _upload_and_cache(
 
     thumbnail = None
     if cover_art_id:
-        cover_url = f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
+        cover_url = (
+            f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
+        )
         thumbnail = URLInputFile(cover_url, filename="cover.jpg")
 
     msg = await bot.send_audio(
         chat_id=user_id,
-        audio=BufferedInputFile(audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"),
+        audio=BufferedInputFile(
+            audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"
+        ),
         thumbnail=thumbnail,
         title=entry.get("title"),
         performer=entry.get("artist"),
@@ -74,11 +78,7 @@ async def fetch_now_playing(base_url: str, auth: dict) -> list[dict]:
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{base_url}/rest/getNowPlaying", params=auth) as resp:
             data = await resp.json(content_type=None)
-    entries = (
-        data.get("subsonic-response", {})
-        .get("nowPlaying", {})
-        .get("entry", [])
-    )
+    entries = data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
     if isinstance(entries, dict):
         entries = [entries]
     return entries
@@ -102,12 +102,16 @@ async def send_audio_entry(
 
     thumbnail = None
     if cover_art_id:
-        cover_url = f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
+        cover_url = (
+            f"{base_url}/rest/getCoverArt?id={cover_art_id}&size=300&{urlencode(auth)}"
+        )
         thumbnail = URLInputFile(cover_url, filename="cover.jpg")
 
     msg = await bot.send_audio(
         chat_id=chat_id,
-        audio=BufferedInputFile(audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"),
+        audio=BufferedInputFile(
+            audio_bytes, filename=f"{entry.get('title', song_id)}.mp3"
+        ),
         thumbnail=thumbnail,
         title=entry.get("title"),
         performer=entry.get("artist"),
@@ -138,16 +142,10 @@ async def now_playing_inline(query: InlineQuery) -> None:
     auth = _auth_params(user["username"], user["password"])
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{base_url}/rest/getNowPlaying", params=auth
-        ) as resp:
+        async with session.get(f"{base_url}/rest/getNowPlaying", params=auth) as resp:
             data = await resp.json(content_type=None)
 
-    entries = (
-        data.get("subsonic-response", {})
-        .get("nowPlaying", {})
-        .get("entry", [])
-    )
+    entries = data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
     if isinstance(entries, dict):
         entries = [entries]
 
@@ -174,7 +172,9 @@ async def now_playing_inline(query: InlineQuery) -> None:
 
         if song_id not in _file_id_cache:
             upload = asyncio.ensure_future(
-                _upload_and_cache(query.bot, query.from_user.id, base_url, entry, auth_entry)
+                _upload_and_cache(
+                    query.bot, query.from_user.id, base_url, entry, auth_entry
+                )
             )
             try:
                 await asyncio.wait_for(asyncio.shield(upload), timeout=5.0)

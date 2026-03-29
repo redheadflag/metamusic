@@ -5,6 +5,7 @@ Redis connection is configured via:
   REDIS_HOST  (default: localhost)
   REDIS_PORT  (default: 6379)
 """
+
 import os
 from arq.connections import RedisSettings
 
