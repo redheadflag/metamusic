@@ -205,20 +205,22 @@ def _track_filename(t: TrackMeta, is_single: bool, ext: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Upload uploaded files to SFTP unprocessed/
+# Upload files directly to SFTP album folder
 # ---------------------------------------------------------------------------
 
 
 def process_album(req: ProcessRequest) -> list[str]:
     """
-    Embed corrected metadata into every track, then upload (raw) to
-      <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
+    Embed corrected metadata into every track, then upload directly to
+      <SFTP_BASE>/<album_artist>/<album>/<filename>
 
-    Also writes cover.jpg into the same folder when cover art is present.
+    Also writes cover.jpg and a .album control file into the same folder.
+    The .album file marks needs_processing=true when the album contains files
+    with more than one distinct audio extension (mixed formats).
 
     Returns the list of remote paths.
     """
-    from services.sftp import upload_file, unprocessed_path, upload_cover
+    from services.sftp import upload_file, album_path, upload_cover, write_album_file
     from soundcloud.tagger import embed_tags
     from soundcloud.downloader import sanitize_m4a_streams
     import base64
@@ -236,11 +238,18 @@ def process_album(req: ProcessRequest) -> list[str]:
         except Exception:
             pass
 
+    # Determine whether the album needs processing (mixed extensions)
+    extensions = {
+        os.path.splitext(t.temp_path)[1].lower() or ".mp3"
+        for t in req.tracks
+    }
+    needs_processing = len(extensions) > 1
+
     saved = []
     for t in req.tracks:
         ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
         fname = _track_filename(t, req.is_single, ext)
-        remote_path = unprocessed_path(_safe(req.album_artist), _safe(req.album), fname)
+        remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
 
         # Per-track cover takes priority over album cover
         cover: Optional[bytes] = shared_cover
@@ -301,6 +310,13 @@ def process_album(req: ProcessRequest) -> list[str]:
             saved.append(cover_path)
             logger.info("Uploaded cover.jpg → %s", cover_path)
 
+    # Write .album control file
+    album_file_path = write_album_file(
+        _safe(req.album_artist), _safe(req.album), needs_processing
+    )
+    if album_file_path:
+        saved.append(album_file_path)
+
     # If all tracks came from a zip subdir, remove the now-empty directory
     dirs = {os.path.dirname(t.temp_path) for t in req.tracks}
     for d in dirs:
@@ -314,16 +330,19 @@ def process_album(req: ProcessRequest) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Download SoundCloud tracks, tag them, upload to SFTP unprocessed/
+# Download SoundCloud tracks, tag them, upload directly to SFTP album folder
 # ---------------------------------------------------------------------------
 
 
 async def process_sc_album(req: ScProcessRequest) -> list[str]:
     """
-    Download SoundCloud tracks, embed metadata + cover art, then upload to
-      <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
+    Download SoundCloud tracks, embed metadata + cover art, then upload directly to
+      <SFTP_BASE>/<album_artist>/<album>/<filename>
 
-    Also writes cover.jpg into the same folder when cover art is present.
+    Also writes cover.jpg and a .album control file into the same folder.
+    For SoundCloud downloads the format is always uniform (yt-dlp picks one
+    best format per track), so needs_processing is determined by whether the
+    resulting files have mixed extensions.
 
     Returns the list of remote paths.
     """
@@ -331,7 +350,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
     from soundcloud.tagger import embed_tags
-    from services.sftp import upload_file, unprocessed_path, upload_cover
+    from services.sftp import upload_file, album_path, upload_cover, write_album_file
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -354,6 +373,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
 
     saved = []
     first_cover: Optional[bytes] = None  # fallback if no shared cover
+    downloaded_exts: set[str] = set()  # track extensions to detect mixed formats
 
     for t in req.tracks:
         if not t.sc_url:
@@ -384,11 +404,10 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             logger.info("Downloading SC track: %r", t.sc_url)
             raw_file = await _run_in_thread(download_raw, t.sc_url, tmp_dir)
 
-            ext = os.path.splitext(raw_file)[1]
+            ext = os.path.splitext(raw_file)[1].lower()
+            downloaded_exts.add(ext)
             fname = _track_filename(t, req.is_single, ext)
-            remote_path = unprocessed_path(
-                _safe(req.album_artist), _safe(req.album), fname
-            )
+            remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
 
             embed_tags(raw_file, meta, cover)
 
@@ -408,5 +427,14 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
         if cover_path:
             saved.append(cover_path)
             logger.info("Uploaded cover.jpg → %s", cover_path)
+
+    # Write .album control file — needs_processing if mixed extensions landed
+    needs_processing = len(downloaded_exts) > 1
+    album_file_path = await _run_in_thread(
+        write_album_file, _safe(req.album_artist), _safe(req.album), needs_processing
+    )
+    if album_file_path:
+        saved.append(album_file_path)
+
 
     return saved

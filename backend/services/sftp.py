@@ -3,16 +3,18 @@ backend/services/sftp.py
 ────────────────────────
 SFTP transport layer for the backend service (paramiko).
 
-The backend always writes into the *unprocessed/* subtree.
-The processor service picks files up from there, converts them,
-and moves them to the parent directory.
+The backend writes files directly into the album folder under SFTP_BASE.
+A .album control file is written alongside the tracks so the processor
+service knows whether format conversion is needed.
 
 Remote layout
 ─────────────
   <SFTP_BASE>/
-  ├── unprocessed/          ← backend writes here
-  │   └── Artist/Album/...
-  └── Artist/Album/...      ← processor writes finished files here
+  └── Artist/
+      └── Album/
+          ├── 01 Track.m4a
+          ├── cover.jpg
+          └── .album        ← needs_processing / is_processed flags
 
 .env variables
 ──────────────
@@ -37,11 +39,8 @@ SFTP_HOST: str = os.environ["SFTP_HOST"]
 SFTP_PORT: int = int(os.getenv("SFTP_PORT", "22"))
 SFTP_USER: str = os.environ["SFTP_USER"]
 SFTP_BASE: str = os.environ["SFTP_BASE"].rstrip("/")
-SFTP_KEY_FILE: str | None = "/app/secrets/sftp_key"
+SFTP_KEY_FILE: str | None = os.getenv("SFTP_KEY_FILE")
 SFTP_PASSWORD: str | None = os.getenv("SFTP_PASSWORD")
-
-# Backend always drops files into unprocessed/
-UNPROCESSED_DIR: str = f"{SFTP_BASE}/unprocessed"
 
 
 class SFTPConnection:
@@ -123,31 +122,30 @@ class SFTPConnection:
 _conn = SFTPConnection()
 
 
+def album_path(album_artist: str, album: str, filename: str) -> str:
+    """
+    Build the remote path for a file directly in the album folder.
+
+      → <SFTP_BASE>/<album_artist>/<album>/<filename>
+    """
+    return str(PurePosixPath(SFTP_BASE) / album_artist / album / filename)
+
+
 def upload_file(local_path: str, remote_path: str) -> None:
     """Upload a local file to an absolute remote path under SFTP_BASE."""
     _conn.upload(local_path, remote_path)
 
 
-def unprocessed_path(album_artist: str, album: str, filename: str) -> str:
-    """
-    Build the remote path for a file going into unprocessed/.
-
-      → <SFTP_BASE>/unprocessed/<album_artist>/<album>/<filename>
-    """
-    return str(PurePosixPath(UNPROCESSED_DIR) / album_artist / album / filename)
-
-
 def upload_cover(cover_bytes: bytes, album_artist: str, album: str) -> str:
     """
-    Write *cover_bytes* as ``cover.jpg`` into the album's unprocessed folder.
+    Write *cover_bytes* as ``cover.jpg`` directly into the album folder.
 
-      → <SFTP_BASE>/unprocessed/<album_artist>/<album>/cover.jpg
+      → <SFTP_BASE>/<album_artist>/<album>/cover.jpg
 
     Returns the remote path on success, empty string on failure (non-fatal).
     """
     import tempfile
-
-    remote_path = unprocessed_path(album_artist, album, "cover.jpg")
+    remote_path = album_path(album_artist, album, "cover.jpg")
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
     try:
         import os
@@ -163,6 +161,50 @@ def upload_cover(cover_bytes: bytes, album_artist: str, album: str) -> str:
         try:
             import os as _os
 
+            _os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def write_album_file(album_artist: str, album: str, needs_processing: bool) -> str:
+    """
+    Write a ``.album`` control file into the album folder.
+
+    Format (key=value, one per line)::
+
+        needs_processing=true
+        is_processed=false
+
+    ``needs_processing`` is True when the album contains files with more than
+    one distinct audio extension (mixed formats that the processor must unify).
+    ``is_processed`` is always written as ``false`` by the backend; the
+    processor service flips it to ``true`` once it finishes.
+
+    Returns the remote path on success, empty string on failure (non-fatal).
+    """
+    import tempfile
+    content = (
+        f"needs_processing={'true' if needs_processing else 'false'}\n"
+        "is_processed=false\n"
+    ).encode()
+    remote_path = album_path(album_artist, album, ".album")
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".album")
+    try:
+        import os
+        os.write(tmp_fd, content)
+        os.close(tmp_fd)
+        _conn.upload(tmp_path, remote_path)
+        logger.info(
+            "Wrote .album file: needs_processing=%s → %s",
+            needs_processing, remote_path,
+        )
+        return remote_path
+    except Exception as exc:
+        logger.warning("Could not write .album file: %s", exc)
+        return ""
+    finally:
+        try:
+            import os as _os
             _os.unlink(tmp_path)
         except OSError:
             pass

@@ -1,27 +1,38 @@
-TEXT_APPLICATIONS_LIST = """
-Список приложений для разных операционных систем (ты можешь выбрать любое)
+# ── Apps by OS ────────────────────────────────────────────────────────────────
+# Each key is an OS name; each value is a list of apps.
+# Fields: name (str), url (str), note (str, optional).
 
-<b>iOS</b>
-──────────────
-<b><a href="https://testflight.apple.com/join/LDWqgjAs">Arpeggi</a></b>
-Красивый и удобный плеер. Доступен бесплатно через TestFlight.
-
-<a>Nautiline</a>
-Полнофункциональный iOS-клиент. Единоразовая покупка без подписок.
-
-
-<b>Android</b>
-──────────────
-<a href="https://play.google.com/store/apps/details?id=app.symfonik.music.player&referrer=utm_source%3Dwebsite%26utm_medium%3Dcta%26utm_campaign%3Dsite_home%26utm_content%3Dheader_primary">Symfonium</a>
-
-
-<b>Desktop (Windows, macOS, Linux)</b>
-──────────────
-<a href="https://github.com/victoralvesf/aonsoku/releases/tag/v0.13.0">Aonsoku</a>
+APPS: dict[str, list[dict]] = {
+    "iOS": [
+        {"name": "Arpeggi",   "url": "https://example.com/arpeggi",  "note": "Красивый и удобный плеер. Доступен бесплатно через TestFlight."},
+        {"name": "Nautiline", "url": "https://example.com/nautiline", "note": "Полнофункциональный iOS-клиент. Единоразовая покупка без подписок."},
+    ],
+    "Android": [
+        {"name": "Symfonium", "url": "https://example.com/symfonium"},
+    ],
+    "Desktop (Windows, macOS, Linux)": [
+        {"name": "Aonsoku", "url": "https://example.com/aonsoku"},
+    ],
+}
 
 
-Помимо этих приложений, ты можешь остановить любое из списка на официальном сайте Navidrome: <a href="https://www.navidrome.org/apps/">https://www.navidrome.org/apps/</a>
-"""
+def _build_apps_text() -> str:
+    lines = ["Список приложений для разных операционных систем (ты можешь выбрать любое)"]
+    for os_name, apps in APPS.items():
+        lines.append(f"\n<b>{os_name}</b>\n──────────────")
+        for app in apps:
+            link = f'<a href="{app["url"]}">{app["name"]}</a>'
+            lines.append(link)
+            if app.get("note"):
+                lines.append(app["note"])
+    lines.append(
+        '\nПомимо этих приложений, ты можешь выбрать любое из списка на официальном сайте Navidrome: '
+        '<a href="https://www.navidrome.org/apps/">https://www.navidrome.org/apps/</a>'
+    )
+    return "\n".join(lines)
+
+
+TEXT_APPLICATIONS_LIST = _build_apps_text()
 
 TEXT_NOW_PLAYING = """🎵 <b>Поделиться треком в любом чате</b>
 

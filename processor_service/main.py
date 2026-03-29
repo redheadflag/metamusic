@@ -4,13 +4,29 @@ processor_service/main.py
 ─────────────────────────
 Standalone audio-processing service.
 
-Workflow (per file):
-  1. Poll sftp://<host>/<SFTP_BASE>/unprocessed/ for new audio files.
-  2. Download each file to a local temp directory.
-  3. Run FFmpeg to convert (e.g. FLAC → MP3) and preserve metadata.
-  4. Upload the finished file to sftp://<host>/<SFTP_BASE>/<Artist>/<Album>/
-     (mirrors the input tree, but one level up — outside "unprocessed").
-  5. Delete the raw source from the "unprocessed" folder.
+Three run modes
+───────────────
+  poll (default)  — watch for new .album control files every POLL_INTERVAL s
+                    and process albums whose needs_processing=true.
+  --once          — one-shot pass over existing .album files, then exit.
+  --sync          — full library sync: walk every album directory regardless
+                    of whether a .album file exists, write/overwrite .album
+                    based on the actual files found, then process any album
+                    that needs it.  Files stay exactly where they are.
+
+Workflow (per album, all modes)
+───────────────────────────────
+  1. List audio files in the album directory.
+  2. Count files per extension; the most-frequent extension is the target
+     format.
+  3. If mixed extensions → needs_processing=true, else false.
+  4. Write (or overwrite) the .album control file in place.
+  5. If needs_processing=false → done.
+  6. Convert every non-target file to the target format with FFmpeg,
+     writing the output alongside the originals (same dir, same stem,
+     new extension).
+  7. Delete the originals that were converted.
+  8. Overwrite .album with is_processed=true.
 
 Configuration is read from the environment / .env file (see .env.example).
 """
@@ -20,6 +36,7 @@ import logging
 import os
 import sys
 import tempfile
+from collections import Counter
 from pathlib import PurePosixPath
 
 from dotenv import load_dotenv
@@ -36,241 +53,195 @@ logger = logging.getLogger("processor")
 # ── Config ────────────────────────────────────────────────────────────────────
 
 POLL_INTERVAL: int = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
-DELETE_SOURCE: bool = (
-    os.getenv("DELETE_SOURCE_AFTER_PROCESSING", "true").lower() == "true"
-)
 WORKER_THREADS: int = int(os.getenv("WORKER_THREADS", "2"))
 FFMPEG_CODEC: str = os.getenv("FFMPEG_CODEC", "libopus")
 FFMPEG_EXT: str = os.getenv("FFMPEG_EXT", ".opus")
 FFMPEG_MAX_BITRATE = int(os.getenv("FFMPEG_MAX_BITRATE_KBPS", "256"))
 
-AUDIO_EXTENSIONS: frozenset[str] = frozenset(
-    {
-        ".mp3",
-        ".flac",
-        ".ogg",
-        ".m4a",
-        ".wav",
-        ".aiff",
-        ".aif",
-        ".opus",
-        ".weba",
-        ".webm",
-    }
-)
-
 # ── Imports (after env is loaded) ─────────────────────────────────────────────
 
-from cloud import (  # noqa: E402
-    list_input_files,
+from cloud import (          # noqa: E402
+    find_album_control_files,
+    find_album_dirs,
+    list_audio_files_in_dir,
+    read_album_file,
+    write_album_file,
     download_file,
     upload_file,
-    delete_input_file,
-    delete_output_file_if_exists,
-    input_to_output_path,
+    delete_file,
     sftp as _sftp_conn,
+    SFTP_BASE,
+    ALBUM_CONTROL_FILE,
+    AUDIO_EXTENSIONS,
 )
-from ffmpeg_processor import (
-    convert,
-    sanitize_tags,
-    extract_cover,
-    probe,
-    should_skip,
-    pick_bitrate,
-)  # noqa: E402
+from ffmpeg_processor import convert, sanitize_tags, probe, should_skip, pick_bitrate  # noqa: E402
 
-# ── State: skip files already processed this session ─────────────────────────
+# ── State: skip albums already processed this session ────────────────────────
 
 _processed: set[str] = set()
 
 
-# ── Per-file handler ──────────────────────────────────────────────────────────
+# ── Per-album handler ─────────────────────────────────────────────────────────
 
 
-async def _handle_file(remote_input: str, sem: asyncio.Semaphore) -> None:
+async def _handle_album(control_path: str, sem: asyncio.Semaphore) -> None:
+    """Process one album identified by its .album control-file path."""
     async with sem:
-        if remote_input in _processed:
+        if control_path in _processed:
             return
 
-        ext = PurePosixPath(remote_input).suffix.lower()
-        if ext not in AUDIO_EXTENSIONS:
+        # ── Read control file ──────────────────────────────────────────────
+        fields = await asyncio.to_thread(read_album_file, control_path)
+        if not fields:
+            logger.warning("Could not read %s — skipping", control_path)
             return
 
-        logger.info("Found: %s", remote_input)
+        if fields.get("needs_processing", "false").lower() != "true":
+            logger.debug("Skipping %s (needs_processing=false)", control_path)
+            _processed.add(control_path)
+            return
 
-        with tempfile.TemporaryDirectory(prefix="proc_") as tmp:
-            src_name = PurePosixPath(remote_input).name
-            local_src = os.path.join(tmp, src_name)
+        if fields.get("is_processed", "false").lower() == "true":
+            logger.debug("Skipping %s (already processed)", control_path)
+            _processed.add(control_path)
+            return
 
-            # 1 — Download raw file
-            try:
-                await asyncio.to_thread(download_file, remote_input, local_src)
-                logger.info("Downloaded: %s", src_name)
-            except Exception as exc:
-                logger.error("Download failed for %r: %s", remote_input, exc)
-                return
+        album_dir = str(PurePosixPath(control_path).parent)
+        logger.info("Processing album: %s", album_dir)
 
-            # 2 — Probe and decide whether to process
-            src_codec, src_kbps = await asyncio.to_thread(probe, local_src)
-            if should_skip(src_codec, src_kbps):
-                logger.info(
-                    "Skipping re-encode for %s — already %s at %d kbps; fixing tags only",
-                    src_name,
-                    src_codec,
-                    src_kbps,
-                )
-                src_suffix = PurePosixPath(remote_input).suffix
-                # Must differ from local_src — FFmpeg refuses to overwrite its own input.
-                local_dest = os.path.join(
-                    tmp, PurePosixPath(src_name).stem + "_clean" + src_suffix
-                )
-                remote_output = input_to_output_path(remote_input, src_suffix)
+        # ── List audio files and pick dominant extension ───────────────────
+        remote_audio = await asyncio.to_thread(list_audio_files_in_dir, album_dir)
+        if not remote_audio:
+            logger.warning("No audio files found in %s — skipping", album_dir)
+            _processed.add(control_path)
+            return
+
+        ext_counts: Counter[str] = Counter(
+            PurePosixPath(p).suffix.lower() for p in remote_audio
+        )
+        target_ext, dominant_count = ext_counts.most_common(1)[0]
+        total = len(remote_audio)
+
+        logger.info(
+            "Album %s: %d file(s) total, dominant format=%s (%d), others=%s",
+            album_dir, total, target_ext, dominant_count,
+            {k: v for k, v in ext_counts.items() if k != target_ext},
+        )
+
+        if len(ext_counts) == 1:
+            # All files already in the same format — nothing to convert.
+            logger.info("All files already %s — marking processed", target_ext)
+            await asyncio.to_thread(
+                write_album_file, control_path,
+                {"needs_processing": "true", "is_processed": "true"},
+            )
+            _processed.add(control_path)
+            return
+
+        # ── Convert non-dominant files ─────────────────────────────────────
+        files_to_convert = [
+            p for p in remote_audio
+            if PurePosixPath(p).suffix.lower() != target_ext
+        ]
+
+        any_failure = False
+        for remote_src in files_to_convert:
+            src_name = PurePosixPath(remote_src).name
+            stem = PurePosixPath(remote_src).stem
+            remote_dest = f"{album_dir}/{stem}{target_ext}"
+
+            logger.info("Converting: %s → %s", src_name, stem + target_ext)
+
+            with tempfile.TemporaryDirectory(prefix="proc_") as tmp:
+                local_src = os.path.join(tmp, src_name)
+                local_dest = os.path.join(tmp, stem + target_ext)
+
+                # Download source
                 try:
-                    await asyncio.to_thread(sanitize_tags, local_src, local_dest)
+                    await asyncio.to_thread(download_file, remote_src, local_src)
                 except Exception as exc:
-                    logger.error("Tag sanitize failed for %r: %s", remote_input, exc)
-                    return
-                # Extract cover art to a cover.jpg alongside the output track.
-                remote_cover = input_to_output_path(remote_input, ".jpg")
-                remote_cover_dir = str(PurePosixPath(remote_cover).parent)
-                local_cover = os.path.join(tmp, "cover.jpg")
-                cover_ok = await asyncio.to_thread(extract_cover, local_src, tmp)
-                if cover_ok:
-                    remote_cover_path = remote_cover_dir + "/cover.jpg"
-                    try:
-                        await asyncio.to_thread(
-                            upload_file, local_cover, remote_cover_path
-                        )
-                        logger.info("Uploaded cover art: %s", remote_cover_path)
-                    except Exception as exc:
-                        logger.warning(
-                            "Cover upload failed for %r: %s", remote_cover_path, exc
-                        )
+                    logger.error("Download failed for %r: %s", remote_src, exc)
+                    any_failure = True
+                    continue
+
+                # Probe codec and pick bitrate
+                src_codec, src_kbps = await asyncio.to_thread(probe, local_src)
+
+                # Map target extension to FFmpeg codec string
+                codec_map = {
+                    ".mp3":  "libmp3lame",
+                    ".m4a":  "aac",
+                    ".aac":  "aac",
+                    ".flac": "flac",
+                    ".ogg":  "libvorbis",
+                    ".opus": "libopus",
+                }
+                codec = codec_map.get(target_ext, FFMPEG_CODEC)
+                target_bitrate = pick_bitrate(src_codec, src_kbps, FFMPEG_MAX_BITRATE)
+
                 try:
-                    await asyncio.to_thread(upload_file, local_dest, remote_output)
-                    logger.info(
-                        "Moved (tag-fixed, no re-encode): %s → %s",
-                        remote_input,
-                        remote_output,
+                    await asyncio.to_thread(
+                        convert,
+                        src=local_src,
+                        dest=local_dest,
+                        codec=codec,
+                        target_bitrate=target_bitrate,
                     )
                 except Exception as exc:
-                    logger.error("Move failed for %r: %s", remote_input, exc)
-                    return
+                    logger.error("FFmpeg failed for %r: %s", remote_src, exc)
+                    any_failure = True
+                    continue
 
-                _processed.add(remote_input)
+                # Upload converted file to the same album directory
+                try:
+                    await asyncio.to_thread(upload_file, local_dest, remote_dest)
+                    logger.info("Uploaded converted: %s", remote_dest)
+                except Exception as exc:
+                    logger.error("Upload failed for %r: %s", remote_dest, exc)
+                    any_failure = True
+                    continue
 
-                if DELETE_SOURCE:
-                    try:
-                        await asyncio.to_thread(delete_input_file, remote_input)
-                        logger.info("Deleted source: %s", remote_input)
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not delete source %r: %s", remote_input, exc
-                        )
+            # Delete the original non-target-format file
+            await asyncio.to_thread(delete_file, remote_src)
+            logger.info("Deleted original: %s", remote_src)
 
-                return
-
-            target_bitrate = pick_bitrate(src_codec, src_kbps, FFMPEG_MAX_BITRATE)
-            logger.info(
-                "Processing %s — codec=%s, src=%d kbps → target=%d kbps",
-                src_name,
-                src_codec,
-                src_kbps,
-                target_bitrate,
+        # ── Overwrite .album with is_processed=true ────────────────────────
+        if not any_failure:
+            await asyncio.to_thread(
+                write_album_file, control_path,
+                {"needs_processing": "true", "is_processed": "true"},
+            )
+            logger.info("Marked as processed: %s", control_path)
+        else:
+            logger.warning(
+                "Some conversions failed for %s — not marking is_processed=true",
+                album_dir,
             )
 
-            # 3 — Convert with FFmpeg
-            local_dest = os.path.join(tmp, PurePosixPath(src_name).stem + FFMPEG_EXT)
-            try:
-                await asyncio.to_thread(
-                    convert,
-                    src=local_src,
-                    dest=local_dest,
-                    codec=FFMPEG_CODEC,
-                    target_bitrate=target_bitrate,
-                )
-            except Exception as exc:
-                logger.error("FFmpeg failed for %r: %s", remote_input, exc)
-                return
-
-            # 4 — Extract cover art and upload to output album directory
-            remote_output = input_to_output_path(remote_input, FFMPEG_EXT)
-            remote_cover_dir = str(PurePosixPath(remote_output).parent)
-            local_cover = os.path.join(tmp, "cover.jpg")
-            cover_ok = await asyncio.to_thread(extract_cover, local_src, tmp)
-            if cover_ok:
-                remote_cover_path = remote_cover_dir + "/cover.jpg"
-                try:
-                    await asyncio.to_thread(upload_file, local_cover, remote_cover_path)
-                    logger.info("Uploaded cover art: %s", remote_cover_path)
-                except Exception as exc:
-                    logger.warning(
-                        "Cover upload failed for %r: %s", remote_cover_path, exc
-                    )
-            # Remove any stale same-stem file with a different extension
-            # (e.g. old .m4a left over before we started converting to .opus).
-            for stale_ext in (
-                ".m4a",
-                ".mp3",
-                ".flac",
-                ".ogg",
-                ".wav",
-                ".aiff",
-                ".aif",
-                ".weba",
-                ".webm",
-            ):
-                if stale_ext == FFMPEG_EXT:
-                    continue
-                stale = input_to_output_path(remote_input, stale_ext)
-                await asyncio.to_thread(delete_output_file_if_exists, stale)
-            # Upload converted track
-            try:
-                await asyncio.to_thread(upload_file, local_dest, remote_output)
-                logger.info("Uploaded: %s", remote_output)
-            except Exception as exc:
-                logger.error("Upload failed for %r: %s", remote_output, exc)
-                return
-
-        # 5 — Mark done and optionally remove the raw source
-        _processed.add(remote_input)
-
-        if DELETE_SOURCE:
-            try:
-                await asyncio.to_thread(delete_input_file, remote_input)
-                logger.info("Deleted source: %s", remote_input)
-            except Exception as exc:
-                logger.warning("Could not delete source %r: %s", remote_input, exc)
+        _processed.add(control_path)
 
 
 # ── Poll loop ─────────────────────────────────────────────────────────────────
 
 
 async def poll_loop() -> None:
-    from cloud import INPUT_DIR, OUTPUT_DIR, SFTP_HOST
-
     sem = asyncio.Semaphore(WORKER_THREADS)
     logger.info(
         "Processor started\n"
         "  host   : %s\n"
-        "  input  : %s\n"
-        "  output : %s\n"
+        "  base   : %s\n"
         "  poll   : every %ds",
-        SFTP_HOST,
-        INPUT_DIR,
-        OUTPUT_DIR,
-        POLL_INTERVAL,
+        os.environ.get("SFTP_HOST", "?"), SFTP_BASE, POLL_INTERVAL,
     )
 
-    # Poll immediately on startup, then wait POLL_INTERVAL between subsequent polls.
     while True:
         try:
-            files = await asyncio.to_thread(list_input_files)
-            logger.info("Polling: found %d file(s) in unprocessed/", len(files))
-            new = [f for f in files if f not in _processed]
+            control_files = await asyncio.to_thread(find_album_control_files)
+            logger.info("Polling: found %d .album file(s)", len(control_files))
+            new = [f for f in control_files if f not in _processed]
             if new:
-                logger.info("Queuing %d new file(s) …", len(new))
-            tasks = [asyncio.create_task(_handle_file(f, sem)) for f in new]
+                logger.info("Queuing %d new album(s) …", len(new))
+            tasks = [asyncio.create_task(_handle_album(f, sem)) for f in new]
             if tasks:
                 await asyncio.gather(*tasks)
         except Exception as exc:
@@ -283,23 +254,80 @@ async def poll_loop() -> None:
 
 
 async def run_once() -> None:
-    """Process every file currently in unprocessed/ and exit."""
-    from cloud import INPUT_DIR, OUTPUT_DIR, SFTP_HOST
-
+    """Process every pending album currently on the SFTP server and exit."""
     sem = asyncio.Semaphore(WORKER_THREADS)
-    logger.info(
-        "One-shot pass\n  host   : %s\n  input  : %s\n  output : %s",
-        SFTP_HOST,
-        INPUT_DIR,
-        OUTPUT_DIR,
-    )
-    files = await asyncio.to_thread(list_input_files)
-    if not files:
-        logger.info("Nothing to process.")
+    logger.info("One-shot pass — base: %s", SFTP_BASE)
+    control_files = await asyncio.to_thread(find_album_control_files)
+    if not control_files:
+        logger.info("No .album files found.")
         return
-    logger.info("Processing %d file(s) …", len(files))
-    await asyncio.gather(*[asyncio.create_task(_handle_file(f, sem)) for f in files])
+    logger.info("Found %d .album file(s) …", len(control_files))
+    await asyncio.gather(*[asyncio.create_task(_handle_album(f, sem)) for f in control_files])
     logger.info("Done.")
+
+
+# ── Full library sync ─────────────────────────────────────────────────────────
+
+async def full_sync() -> None:
+    """
+    Walk every album directory under SFTP_BASE, unconditionally inspect the
+    audio files present, write (or overwrite) the .album control file, then
+    process any album that needs format unification.
+
+    Nothing is moved — files stay exactly where they are.
+    """
+    sem = asyncio.Semaphore(WORKER_THREADS)
+    logger.info("Full sync started — base: %s", SFTP_BASE)
+
+    album_dirs = await asyncio.to_thread(find_album_dirs)
+    if not album_dirs:
+        logger.info("No album directories found under %s.", SFTP_BASE)
+        return
+
+    logger.info("Found %d album director(ies) to inspect.", len(album_dirs))
+
+    async def _sync_one(album_dir: str) -> None:
+        control_path = f"{album_dir}/{ALBUM_CONTROL_FILE}"
+
+        # ── Inspect audio files in this directory ──────────────────────────
+        remote_audio = await asyncio.to_thread(list_audio_files_in_dir, album_dir)
+        if not remote_audio:
+            logger.debug("No audio files in %s — skipping", album_dir)
+            return
+
+        ext_counts: Counter[str] = Counter(
+            PurePosixPath(p).suffix.lower() for p in remote_audio
+        )
+        needs_processing = len(ext_counts) > 1
+
+        logger.info(
+            "Sync %s: %d file(s), formats=%s → needs_processing=%s",
+            album_dir, len(remote_audio), dict(ext_counts), needs_processing,
+        )
+
+        # ── Write / overwrite .album file ──────────────────────────────────
+        # Always rewrite so the file reflects the current state of the folder,
+        # even if one already existed (it may be stale after manual edits).
+        await asyncio.to_thread(
+            write_album_file, control_path,
+            {
+                "needs_processing": "true" if needs_processing else "false",
+                "is_processed": "false",
+            },
+        )
+
+        if not needs_processing:
+            logger.info("Album %s is uniform — no conversion needed.", album_dir)
+            return
+
+        # ── Hand off to the normal per-album handler ───────────────────────
+        # _handle_album will re-read the .album file we just wrote, so it will
+        # see needs_processing=true and is_processed=false and proceed.
+        await _handle_album(control_path, sem)
+
+    tasks = [asyncio.create_task(_sync_one(d)) for d in album_dirs]
+    await asyncio.gather(*tasks)
+    logger.info("Full sync complete.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -307,16 +335,31 @@ async def run_once() -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
+    parser = argparse.ArgumentParser(description="Audio processor service")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--once",
         action="store_true",
-        help="Process all files currently in unprocessed/ and exit (no polling).",
+        help="Process all albums that have a pending .album file, then exit.",
+    )
+    mode.add_argument(
+        "--sync",
+        action="store_true",
+        help=(
+            "Full library sync: inspect every album directory, write/overwrite "
+            ".album files based on actual contents, convert where needed, then exit. "
+            "Files are never moved."
+        ),
     )
     args = parser.parse_args()
 
     try:
-        asyncio.run(run_once() if args.once else poll_loop())
+        if args.sync:
+            asyncio.run(full_sync())
+        elif args.once:
+            asyncio.run(run_once())
+        else:
+            asyncio.run(poll_loop())
     except KeyboardInterrupt:
         logger.info("Shutting down …")
     finally:

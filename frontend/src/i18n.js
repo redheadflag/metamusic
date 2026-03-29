@@ -52,6 +52,12 @@ export const translations = {
     removeAlbum:      "Remove",
     saveAllToLibrary: "Save all to library",
 
+    // Request modal
+    requestBtn:       "Request artist / album / track",
+    requestTitle:     "Request music",
+    requestBody:      "List the artists, albums, or tracks you'd like added to the server. Please include only content you actually listen to — server space is not unlimited.",
+    close:            "Close",
+
     // App states
     uploadingLabel:   "Uploading…",
     fetchingSc:       "Fetching metadata from SoundCloud…",
@@ -118,6 +124,12 @@ export const translations = {
     trackCount:       (n) => `${n} ${n === 1 ? "трек" : n < 5 ? "трека" : "треков"}`,
     removeAlbum:      "Удалить",
     saveAllToLibrary: "Сохранить всё в библиотеку",
+
+    // Request modal
+    requestBtn:       "Попросить добавить артиста / альбом / трек",
+    requestTitle:     "Запрос на добавление музыки",
+    requestBody:      "Укажите список исполнителей, альбомов или треков, которые вы хотели бы видеть на сервере. Просьба включать только то, что вы действительно слушаете — место на сервере ограничено.",
+    close:            "Закрыть",
 
     // App states
     uploadingLabel:   "Загрузка…",
