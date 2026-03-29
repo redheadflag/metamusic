@@ -5,6 +5,7 @@ mutagen
 aiogram>=3.0
 python-dotenv
 httpx[socks]
+aiohttp
 yt-dlp
 requests
 arq

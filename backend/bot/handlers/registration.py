@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
+from db import save_user
 from keyboards import account_menu
 from services.navidrome import create_navidrome_user
 
@@ -43,6 +44,7 @@ async def handle_username(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Не удалось создать аккаунт: {exc}")
         return
 
+    save_user(message.from_user.id, username, password)
     await state.clear()
     await message.answer(
         f"✅ Аккаунт создан!\n\n"
