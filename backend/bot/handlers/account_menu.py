@@ -6,7 +6,7 @@ from aiogram.types import Message
 
 from constants import TEXT_APPLICATIONS_LIST, TEXT_NOW_PLAYING, TEXT_UPLOAD_MUSIC
 from db import get_user
-from handlers.inline import _auth_params, fetch_now_playing, send_audio_entry
+from handlers.inline import _auth_params, fetch_last_played_song, fetch_now_playing, send_audio_entry
 from keyboards import BTN_APPLICATIONS, BTN_NOW_PLAYING, BTN_UPLOAD_MUSIC
 
 router = Router()
@@ -29,11 +29,15 @@ async def handle_now_playing(message: Message):
     auth = _auth_params(user["username"], user["password"])
     entries = await fetch_now_playing(base_url, auth, user["username"])
 
-    if not entries:
-        await message.answer("▶️ Сейчас ничего не играет.")
-        return
-
-    await send_audio_entry(message.bot, message.chat.id, base_url, entries[0], auth)
+    if entries:
+        await send_audio_entry(message.bot, message.chat.id, base_url, entries[0], auth)
+    else:
+        last = await fetch_last_played_song(base_url, user["username"], user["password"])
+        if last:
+            await message.answer("Сейчас ничего не играет. Последний прослушанный трек:")
+            await send_audio_entry(message.bot, message.chat.id, base_url, last, auth)
+        else:
+            await message.answer("▶️ Сейчас ничего не играет.")
 
 
 @router.message(F.text == BTN_APPLICATIONS)

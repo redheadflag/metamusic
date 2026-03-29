@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import os
+from random import random
 import secrets
 from urllib.parse import urlencode
 
@@ -34,6 +35,43 @@ def _auth_params(username: str, password: str) -> dict:
         "v": "1.16.1",
         "c": "redheadflagbot",
         "f": "json",
+    }
+
+
+async def fetch_last_played_song(base_url: str, username: str, password: str) -> dict | None:
+    """Return the most recently played song via Navidrome REST API, or None."""
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{base_url}/auth/login",
+            json={"username": username, "password": password},
+        ) as resp:
+            token = (await resp.json(content_type=None)).get("token")
+
+    if not token:
+        return None
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"{base_url}/api/song",
+            params={"_sort": "play_date", "_order": "DESC", "_start": "0", "_end": "1"},
+            headers={"X-ND-Authorization": f"Bearer {token}"},
+        ) as resp:
+            songs = await resp.json(content_type=None)
+
+    if not songs or not isinstance(songs, list):
+        return None
+
+    song = songs[0]
+    if not song.get("playDate"):
+        return None
+
+    # Normalise to the same shape used by getNowPlaying / send_audio_entry
+    return {
+        "id": song["id"],
+        "title": song.get("title"),
+        "artist": song.get("artist"),
+        "coverArt": song.get("coverArtId"),
+        "duration": int(song.get("duration") or 0),
     }
 
 
@@ -135,20 +173,24 @@ async def now_playing_inline(query: InlineQuery) -> None:
     auth = _auth_params(user["username"], user["password"])
     entries = await fetch_now_playing(base_url, auth, user["username"])
 
-    if not entries:
-        await query.answer(
-            [
-                InlineQueryResultArticle(
-                    id="nothing",
-                    title="Ничего не играет",
-                    input_message_content=InputTextMessageContent(
-                        message_text="Сейчас ничего не играет."
-                    ),
-                )
-            ],
-            cache_time=10,
-        )
-        return
+    is_live = bool(entries)
+    if not is_live:
+        last = await fetch_last_played_song(base_url, user["username"], user["password"])
+        if not last:
+            await query.answer(
+                [
+                    InlineQueryResultArticle(
+                        id="nothing",
+                        title="Ничего не играет",
+                        input_message_content=InputTextMessageContent(
+                            message_text="Сейчас ничего не играет."
+                        ),
+                    )
+                ],
+                cache_time=10,
+            )
+            return
+        entries = [last]
 
     results = []
     for entry in entries:
@@ -170,6 +212,7 @@ async def now_playing_inline(query: InlineQuery) -> None:
                 InlineQueryResultCachedAudio(
                     id=song_id,
                     audio_file_id=_file_id_cache[song_id],
+                    caption="music.redheadflag.com" if bool(random() < 0.1) else None,
                 )
             )
         else:
