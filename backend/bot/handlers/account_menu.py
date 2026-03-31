@@ -2,14 +2,15 @@ import logging
 import os
 
 from aiogram import Bot, Router, F
+from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from constants import TEXT_APPLICATIONS_LIST, TEXT_NOW_PLAYING, TEXT_UPLOAD_MUSIC
+from constants import APPS, TEXT_NOW_PLAYING, TEXT_UPLOAD_MUSIC
 from db import get_user
 from handlers.inline import _auth_params, fetch_last_played_song, fetch_now_playing, send_audio_entry
-from keyboards import BTN_APPLICATIONS, BTN_NOW_PLAYING, BTN_UPLOAD_MUSIC, BTN_REQUEST_MUSIC, account_menu
+from keyboards import BTN_APPLICATIONS, BTN_NOW_PLAYING, BTN_UPLOAD_MUSIC, BTN_REQUEST_MUSIC, account_menu, apps_os_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -49,9 +50,29 @@ async def handle_now_playing(message: Message):
 @router.message(F.text == BTN_APPLICATIONS)
 async def handle_applications(message: Message):
     await message.answer(
-        TEXT_APPLICATIONS_LIST,
-        parse_mode="HTML",
+        "Выберите операционную систему:",
+        reply_markup=apps_os_keyboard(),
     )
+
+
+@router.callback_query(F.data.startswith("apps_os:"))
+async def handle_apps_os(callback: CallbackQuery):
+    assert callback.message
+
+    os_name = callback.data.removeprefix("apps_os:")
+    apps = APPS.get(os_name, [])
+    if not apps:
+        await callback.answer("Неизвестная система", show_alert=True)
+        return
+    lines = [f"<b>{os_name}</b>"]
+    for app in apps:
+        app_str_parts = []
+        app_str_parts.append(f'<a href="{app["url"]}">{app["name"]}</a>')
+        if app.get("note"):
+            app_str_parts.append(app["note"])
+        lines.append("\n".join(app_str_parts))
+    await callback.message.answer("\n\n".join(lines))
+    await callback.answer()
 
 
 @router.message(F.text == BTN_UPLOAD_MUSIC)
