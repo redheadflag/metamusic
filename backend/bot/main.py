@@ -43,7 +43,10 @@ async def main() -> None:
     bot_info = await bot.get_me()
     logger.info("Bot @%s started successfully", bot_info.username)
 
-    await dp.start_polling(bot)
+    await dp.start_polling(
+        bot,
+        allowed_updates=["message", "callback_query", "inline_query", "chosen_inline_result"],
+    )
 
 
 if __name__ == "__main__":
