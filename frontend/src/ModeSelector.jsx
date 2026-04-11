@@ -25,6 +25,18 @@ const modes = [
     labelKey: "soundcloud",
     hintKey:  "soundcloudHint",
   },
+  {
+    id: "youtube",
+    icon: (
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="6" width="20" height="14" rx="3"/>
+        <path d="M10 9.5l5 2.5-5 2.5V9.5z" fill="currentColor" stroke="none"/>
+        <path d="M8 3h8"/>
+      </svg>
+    ),
+    labelKey: "ytImport",
+    hintKey:  "ytImportHint",
+  },
 ];
 
 export default function ModeSelector({ onSelect }) {

@@ -8,6 +8,7 @@ from api.jobs import get_redis, close_redis
 from api.upload import router as upload_router
 from api.jobs import router as jobs_router
 from api.soundcloud import router as sc_router
+from api.youtube import router as yt_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -46,3 +47,4 @@ app.add_middleware(
 app.include_router(upload_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(sc_router, prefix="/api")
+app.include_router(yt_router, prefix="/api")

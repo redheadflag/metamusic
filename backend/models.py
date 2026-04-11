@@ -73,3 +73,43 @@ class AlbumMeta(BaseModel):
 
 class BulkProcessRequest(BaseModel):
     albums: list[ProcessRequest]
+
+
+# ---------------------------------------------------------------------------
+# YouTube playlist import
+# ---------------------------------------------------------------------------
+
+
+class YtTrackScan(BaseModel):
+    """One track returned from /api/yt-scan."""
+    video_id: str
+    title: str
+    artist: str
+    duration: int | None = None
+    thumbnail: str | None = None
+    in_navidrome: bool
+    navidrome_id: str | None = None
+
+
+class YtPlaylistScan(BaseModel):
+    """Full result of /api/yt-scan."""
+    playlist_id: str
+    playlist_name: str
+    tracks: list[YtTrackScan]
+
+
+class YtTrackImport(BaseModel):
+    """One track submitted to /api/yt-import (user may have edited title/artist)."""
+    video_id: str
+    title: str
+    artist: str
+    duration: int | None = None
+    in_navidrome: bool = False
+    navidrome_id: str | None = None
+    skip: bool = False  # user explicitly excluded this track
+
+
+class YtImportRequest(BaseModel):
+    """Request body for /api/yt-import."""
+    playlist_name: str
+    tracks: list[YtTrackImport]

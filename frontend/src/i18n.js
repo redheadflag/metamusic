@@ -58,6 +58,22 @@ export const translations = {
     requestBody:      "List the artists, albums, or tracks you'd like added to the server. Please include only content you actually listen to — server space is not unlimited.",
     close:            "Close",
 
+    // YouTube playlist import (ModeSelector)
+    ytImport:         "Import YouTube playlist",
+    ytImportHint:     "Scan a YouTube Music playlist and download missing tracks",
+
+    // PlaylistImport component
+    ytPlaylistUrl:    "YouTube playlist URL",
+    ytUrlPlaceholder: "https://music.youtube.com/playlist?list=… or https://www.youtube.com/playlist?list=…",
+    ytScan:           "Scan",
+    ytScanning:       "Scanning…",
+    ytTracksFound:    (total, matched) => `${total} track${total !== 1 ? "s" : ""} · ${matched} in library`,
+    ytImportBtn:      (n) => `Download & import ${n} track${n !== 1 ? "s" : ""}`,
+    ytAllMatched:     "All tracks are already in the library",
+    ytSkip:           "Skip",
+    ytUnskip:         "Undo skip",
+    edit:             "Edit",
+
     // App states
     uploadingLabel:   "Uploading…",
     fetchingSc:       "Fetching metadata from SoundCloud…",
@@ -130,6 +146,22 @@ export const translations = {
     requestTitle:     "Запрос на добавление музыки",
     requestBody:      "Укажите список исполнителей, альбомов или треков, которые вы хотели бы видеть на сервере. Просьба включать только то, что вы действительно слушаете — место на сервере ограничено.",
     close:            "Закрыть",
+
+    // YouTube playlist import (ModeSelector)
+    ytImport:         "Импорт плейлиста YouTube",
+    ytImportHint:     "Сканирует плейлист YouTube Music и скачивает отсутствующие треки",
+
+    // PlaylistImport component
+    ytPlaylistUrl:    "Ссылка на плейлист YouTube",
+    ytUrlPlaceholder: "https://music.youtube.com/playlist?list=… или https://www.youtube.com/playlist?list=…",
+    ytScan:           "Сканировать",
+    ytScanning:       "Сканирую…",
+    ytTracksFound:    (total, matched) => `${total} ${total === 1 ? "трек" : total < 5 ? "трека" : "треков"} · ${matched} в библиотеке`,
+    ytImportBtn:      (n) => `Скачать и импортировать ${n} ${n === 1 ? "трек" : n < 5 ? "трека" : "треков"}`,
+    ytAllMatched:     "Все треки уже есть в библиотеке",
+    ytSkip:           "Пропустить",
+    ytUnskip:         "Отмена",
+    edit:             "Изменить",
 
     // App states
     uploadingLabel:   "Загрузка…",

@@ -10,7 +10,7 @@ services:
     env_file: backend/.env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
-      HTTPS_PROXY: socks5://host.docker.internal:1080
+      # HTTPS_PROXY: socks5://host.docker.internal:1080
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
       UPLOAD_DIR: /app/uploads
@@ -37,7 +37,7 @@ services:
     env_file: backend/.env
     environment:
       YTDLP_CONFIG: /app/config/yt-dlp.conf
-      HTTPS_PROXY: socks5://host.docker.internal:1080
+      # HTTPS_PROXY: socks5://host.docker.internal:1080
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
       UPLOAD_DIR: /app/uploads

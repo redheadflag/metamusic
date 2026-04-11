@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { LangProvider, useLang } from "./LangContext.jsx";
-import ModeSelector from "./ModeSelector.jsx";
-import UploadZone   from "./UploadZone.jsx";
-import ScInput      from "./ScInput.jsx";
-import MetaEditor   from "./MetaEditor.jsx";
-import BulkEditor   from "./BulkEditor.jsx";
+import ModeSelector    from "./ModeSelector.jsx";
+import UploadZone      from "./UploadZone.jsx";
+import ScInput         from "./ScInput.jsx";
+import MetaEditor      from "./MetaEditor.jsx";
+import BulkEditor      from "./BulkEditor.jsx";
+import PlaylistImport  from "./PlaylistImport.jsx";
 
 const API = "/api";
 
@@ -114,9 +115,9 @@ async function enqueueJob(url, body) {
 
 // ── App (inner — needs useLang) ───────────────────────────────────────────────
 
-// mode:  null | "files" | "soundcloud"
+// mode:  null | "files" | "soundcloud" | "youtube"
 // state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing"
-//      | "bulk-editing" | "saving" | "sent" | "done" | "error"
+//      | "bulk-editing" | "yt-input" | "saving" | "sent" | "done" | "error"
 
 function AppInner() {
   const { t } = useLang();
@@ -192,6 +193,19 @@ function AppInner() {
       });
     } catch (e) {
       console.warn("Could not clean up temp files:", e);
+    }
+  }
+
+  // ── YouTube playlist import ───────────────────────────────────────────
+  async function handleYtImport(importReq) {
+    setState("saving");
+    setError(null);
+    try {
+      await enqueueJob(`${API}/yt-import`, importReq);
+      setState("sent");
+    } catch (e) {
+      setError(e.message);
+      setState("error");
     }
   }
 
@@ -275,6 +289,7 @@ function AppInner() {
         <ModeSelector onSelect={(m) => {
           setMode(m);
           if (m === "soundcloud") setState("sc-input");
+          if (m === "youtube")    setState("yt-input");
         }} />
       )}
 
@@ -293,6 +308,14 @@ function AppInner() {
 
       {state === "sc-fetching" && (
         <p style={{ color: "var(--text)", opacity: 0.5 }}>{t("fetchingSc")}</p>
+      )}
+
+      {/* YouTube playlist import */}
+      {state === "yt-input" && (
+        <PlaylistImport
+          onBack={() => { setMode(null); setState("idle"); }}
+          onImport={handleYtImport}
+        />
       )}
 
       {/* Upload progress */}

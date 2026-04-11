@@ -17,6 +17,9 @@ from .utils import log, run
 logger = logging.getLogger(__name__)
 
 YTDLP_CONFIG = os.environ.get("YTDLP_CONFIG", "/app/config/yt-dlp.conf")
+# Explicit SoundCloud cookie file.  When set, overrides the --cookies path
+# baked into yt-dlp.conf so the file can live anywhere on the host.
+SC_COOKIES_FILE = os.environ.get("SC_COOKIES_FILE", "").strip()
 SC_SEARCH_RESULTS = 10
 
 
@@ -25,6 +28,10 @@ def _ytdlp_base() -> list[str]:
     if os.path.exists(YTDLP_CONFIG):
         cmd += ["--config-location", YTDLP_CONFIG]
         log(f"Using yt-dlp config: {YTDLP_CONFIG}")
+    if SC_COOKIES_FILE and os.path.exists(SC_COOKIES_FILE):
+        # Override the cookies path from yt-dlp.conf (last --cookies wins)
+        cmd += ["--cookies", SC_COOKIES_FILE]
+        log(f"Using SC cookies override: {SC_COOKIES_FILE}")
     return cmd
 
 
