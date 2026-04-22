@@ -68,6 +68,16 @@ def _vorbis_picture_block(cover: bytes) -> str:
     return base64.b64encode(block).decode()
 
 
+def _artists(meta: dict) -> list[str]:
+    v = meta.get("artists") or []
+    return [a for a in (str(x).strip() for x in v) if a]
+
+
+def _album_artists(meta: dict) -> list[str]:
+    v = meta.get("album_artists") or meta.get("artists") or []
+    return [a for a in (str(x).strip() for x in v) if a]
+
+
 def _embed_id3(path: str, meta: dict, cover: Optional[bytes]) -> None:
     from mutagen.id3 import (
         ID3,
@@ -88,8 +98,8 @@ def _embed_id3(path: str, meta: dict, cover: Optional[bytes]) -> None:
 
     tags.clear()
     tags.add(TIT2(encoding=3, text=meta["title"]))
-    tags.add(TPE1(encoding=3, text=meta["artist"]))
-    tags.add(TPE2(encoding=3, text=meta["album_artist"]))
+    tags.add(TPE1(encoding=3, text=_artists(meta)))
+    tags.add(TPE2(encoding=3, text=_album_artists(meta)))
     tags.add(TALB(encoding=3, text=meta["album"]))
     tags.add(TDRC(encoding=3, text=str(meta["release_year"])))
     if meta.get("track_number") is not None:
@@ -97,7 +107,10 @@ def _embed_id3(path: str, meta: dict, cover: Optional[bytes]) -> None:
     if cover:
         tags.add(APIC(encoding=3, mime=_mime(cover), type=3, desc="Cover", data=cover))
 
-    tags.save(path, v2_version=3)
+    # v2_version=4 to support multi-value TPE1/TPE2 (ID3v2.3 has a single
+    # "/"-delimited string; v2.4 stores each value with a null separator so
+    # Navidrome, Beets, etc. see them as discrete entries).
+    tags.save(path, v2_version=4)
 
 
 def _embed_vorbis(path: str, meta: dict, cover: Optional[bytes], cls) -> None:
@@ -111,8 +124,8 @@ def _embed_vorbis(path: str, meta: dict, cover: Optional[bytes], cls) -> None:
     audio.tags.clear()
 
     audio.tags["title"] = meta["title"]
-    audio.tags["artist"] = meta["artist"]
-    audio.tags["albumartist"] = meta["album_artist"]
+    audio.tags["artist"] = _artists(meta)
+    audio.tags["albumartist"] = _album_artists(meta)
     audio.tags["album"] = meta["album"]
     audio.tags["date"] = str(meta["release_year"])
     if meta.get("track_number") is not None:
@@ -134,8 +147,8 @@ def _embed_flac(path: str, meta: dict, cover: Optional[bytes]) -> None:
     audio.tags.clear()
 
     audio.tags["title"] = meta["title"]
-    audio.tags["artist"] = meta["artist"]
-    audio.tags["albumartist"] = meta["album_artist"]
+    audio.tags["artist"] = _artists(meta)
+    audio.tags["albumartist"] = _album_artists(meta)
     audio.tags["album"] = meta["album"]
     audio.tags["date"] = str(meta["release_year"])
     if meta.get("track_number") is not None:
@@ -167,14 +180,18 @@ def _embed_mp4(path: str, meta: dict, cover: Optional[bytes]) -> None:
     # or any other tag the original file or yt-dlp may have injected.
     audio.tags.clear()
 
+    artists = _artists(meta)
+    album_artists = _album_artists(meta)
+    joined_album_artist = "; ".join(album_artists)
+
     audio["\xa9nam"] = [meta["title"]]
-    audio["\xa9ART"] = [meta["artist"]]
-    audio["aART"] = [meta["album_artist"]]  # iTunes atom — read by most players
+    audio["\xa9ART"] = artists
+    audio["aART"] = album_artists
     # Navidrome (and many other servers) groups albums by the freeform
     # "albumartist" tag, not the iTunes aART atom.  Write both so M4A files
     # land in the same album as any .opus/.flac siblings.
     audio["----:com.apple.iTunes:albumartist"] = [
-        mutagen.mp4.MP4FreeForm(meta["album_artist"].encode("utf-8"))
+        mutagen.mp4.MP4FreeForm(joined_album_artist.encode("utf-8"))
     ]
     audio["\xa9alb"] = [meta["album"]]
     audio["\xa9day"] = [str(meta["release_year"])]
@@ -207,10 +224,10 @@ def embed_tags(path: str, meta: dict, cover: Optional[bytes]) -> None:
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
 
     logger.info(
-        "Tagging %s: title=%r artist=%r album=%r track=%s cover=%s",
+        "Tagging %s: title=%r artists=%r album=%r track=%s cover=%s",
         path,
         meta.get("title"),
-        meta.get("artist"),
+        _artists(meta),
         meta.get("album"),
         meta.get("track_number"),
         f"{len(cover)} bytes" if cover else "none",

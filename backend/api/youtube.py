@@ -47,13 +47,16 @@ async def yt_scan(body: dict):
 
     # Match each track against Navidrome concurrently
     async def _match(t: dict) -> YtTrackScan:
+        from fix_artists import split_artist
+        raw_artist = t.get("artist", "")
         found, nav_id = await _run_blocking(
-            find_in_navidrome, t["title"], t.get("artist", "")
+            find_in_navidrome, t["title"], raw_artist
         )
+        artists = split_artist(raw_artist) or ([raw_artist.strip()] if raw_artist.strip() else [])
         return YtTrackScan(
             video_id=t["video_id"],
             title=t["title"],
-            artist=t.get("artist", ""),
+            artists=artists,
             duration=t.get("duration"),
             thumbnail=t.get("thumbnail"),
             in_navidrome=found,

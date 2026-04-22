@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import ArtistsEditor from "./ArtistsEditor.jsx";
 import { useLang } from "./LangContext.jsx";
 
 const Field = ({ label, value, onChange, required }) => (
@@ -84,8 +85,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
   const [showCodec, setShowCodec] = useState(false);
 
   const [shared, setShared] = useState({
-    artist:        first.artist,
-    album_artist:  first.artist,
+    artists:       Array.isArray(first.artists) ? first.artists : [],
     album:         first.album,
     release_year:  first.release_year,
     cover_art_b64: first.cover_art_b64 ?? null,
@@ -121,11 +121,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
     setOverIndex(null);
   }
 
-  const set = (key) => (v) =>
-    setShared((s) => ({
-      ...s, [key]: v,
-      ...(key === "artist" ? { album_artist: v } : {}),
-    }));
+  const set = (key) => (v) => setShared((s) => ({ ...s, [key]: v }));
 
   function handleCoverFile(e) {
     const file = e.target.files[0];
@@ -137,7 +133,7 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
   }
 
   const missing =
-    !shared.artist ||
+    !shared.artists.length ||
     (!isSingle && !shared.album) ||
     rows.some((r) => !r.title.trim());
 
@@ -182,7 +178,20 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         </label>
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
-          <Field label={t("artistLabel")} value={shared.artist} onChange={set("artist")} required />
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <label style={{
+              fontSize: 11, fontWeight: 600, color: "var(--text)",
+              textTransform: "uppercase", letterSpacing: "0.07em",
+            }}>
+              {t("artistsLabel")}
+              <span style={{ color: "var(--danger)", marginLeft: 2 }}>*</span>
+            </label>
+            <ArtistsEditor
+              value={shared.artists}
+              onChange={set("artists")}
+              placeholder={t("artistsPlaceholder")}
+            />
+          </div>
 
           {isSingle ? (
             <div style={{ width: "50%" }}>

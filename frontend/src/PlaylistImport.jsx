@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ArtistsEditor from "./ArtistsEditor.jsx";
 import { useLang } from "./LangContext.jsx";
 
 const API = "/api";
@@ -48,11 +49,10 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
             placeholder={t("trackLabel")}
             style={inputStyle}
           />
-          <input
-            value={track.artist}
-            onChange={e => onChange({ artist: e.target.value })}
-            placeholder={t("artistLabel")}
-            style={inputStyle}
+          <ArtistsEditor
+            value={track.artists || []}
+            onChange={(a) => onChange({ artists: a })}
+            placeholder={t("artistsPlaceholder")}
           />
           <button onClick={onStopEdit} style={{ alignSelf: "flex-start", fontSize: 12 }}>
             {t("close")}
@@ -78,7 +78,9 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}>
-            {track.artist || "—"}
+            {(track.artists && track.artists.length)
+              ? track.artists.join(", ")
+              : "—"}
           </div>
         </div>
       )}
@@ -180,7 +182,7 @@ export default function PlaylistImport({ onBack, onImport }) {
       tracks: tracks.map(t => ({
         video_id:     t.video_id,
         title:        t.title,
-        artist:       t.artist,
+        artists:      t.artists || [],
         duration:     t.duration,
         in_navidrome: t.in_navidrome,
         navidrome_id: t.navidrome_id || null,

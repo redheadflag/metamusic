@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ArtistsEditor from "./ArtistsEditor.jsx";
 import { useLang } from "./LangContext.jsx";
 
 const formatDuration = (seconds) => {
@@ -26,11 +27,7 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
   const { t } = useLang();
 
   const set = (key) => (v) => {
-    onChange(index, {
-      ...albumMeta,
-      [key]: v,
-      ...(key === "artist" ? { album_artist: v } : {}),
-    });
+    onChange(index, { ...albumMeta, [key]: v });
   };
 
   function handleCoverFile(e) {
@@ -51,7 +48,8 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
     onChange(index, { ...albumMeta, tracks });
   }
 
-  const invalid = !albumMeta.artist || !albumMeta.album || albumMeta.tracks.some((t) => !t.title.trim());
+  const artists = albumMeta.artists || [];
+  const invalid = !artists.length || !albumMeta.album || albumMeta.tracks.some((t) => !t.title.trim());
 
   return (
     <div style={{
@@ -79,7 +77,9 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
           )}
           <div>
             <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-h)" }}>
-              {albumMeta.artist || <span style={{ opacity: 0.4 }}>{t("noArtist")}</span>}
+              {artists.length
+                ? artists.join(", ")
+                : <span style={{ opacity: 0.4 }}>{t("noArtist")}</span>}
               {albumMeta.album ? ` — ${albumMeta.album}` : ""}
             </div>
             <div style={{ fontSize: 11, color: "var(--text)", opacity: 0.5 }}>
@@ -122,8 +122,19 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
             </label>
 
             <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div style={{ gridColumn: "1 / -1" }}>
-                <Field label={t("artistLabel")} value={albumMeta.artist} onChange={set("artist")} required />
+              <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{
+                  fontSize: 11, fontWeight: 600, color: "var(--text)",
+                  textTransform: "uppercase", letterSpacing: "0.07em",
+                }}>
+                  {t("artistsLabel")}
+                  <span style={{ color: "var(--danger)", marginLeft: 2 }}>*</span>
+                </label>
+                <ArtistsEditor
+                  value={artists}
+                  onChange={set("artists")}
+                  placeholder={t("artistsPlaceholder")}
+                />
               </div>
               <Field label={t("albumLabel")}  value={albumMeta.album}        onChange={set("album")}        required />
               <Field label={t("yearLabel")}   value={albumMeta.release_year} onChange={set("release_year")} />
@@ -228,13 +239,12 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
   }
 
   const anyInvalid = albums.some(
-    (a) => !a.artist || !a.album || a.tracks.some((t) => !t.title.trim())
+    (a) => !(a.artists && a.artists.length) || !a.album || a.tracks.some((t) => !t.title.trim())
   );
 
   function confirm() {
     onConfirm(albums.map((a) => ({
-      artist:        a.artist,
-      album_artist:  a.album_artist || a.artist,
+      artists:       a.artists || [],
       album:         a.album,
       release_year:  a.release_year,
       cover_art_b64: a.cover_art_b64,

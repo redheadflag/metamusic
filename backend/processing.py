@@ -4,8 +4,9 @@ import os
 import re
 import tempfile
 import shutil
-from typing import Optional
+from typing import Any, Optional
 
+from fix_artists import split_artist
 from models import ProcessRequest, ScProcessRequest, TrackMeta
 
 logger = logging.getLogger(__name__)
@@ -15,24 +16,26 @@ def _safe(s: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", s).strip()
 
 
-def _normalize_artists(artist: str, title: str) -> tuple[str, str]:
-    """
-    Split multiple artists into a single album_artist + (feat. ...) in title.
-    e.g. artist="Gone.Fludd, LSP" title="Uti-Puti"
-      -> artist="Gone.Fludd"  title="Uti-Puti (feat. LSP)"
-    """
-    parts = [a.strip() for a in re.split(r"[,&/;\\]", artist) if a.strip()]
-    if len(parts) <= 1:
-        return artist, title
+def _to_list(raw: Any) -> list[str]:
+    """Normalise a tag value (str or list) into a list of trimmed artist names."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        items: list[str] = []
+        for x in raw:
+            s = str(x).strip()
+            if s:
+                items.extend(split_artist(s) or [s])
+        return items
+    s = str(raw).strip()
+    if not s:
+        return []
+    return split_artist(s) or [s]
 
-    main = parts[0]
-    featuring = parts[1:]
-    already_present = any(f.lower() in title.lower() for f in featuring)
-    if not already_present:
-        feat_str = f"(feat. {', '.join(featuring)})"
-        title = f"{title} {feat_str}"
 
-    return main, title
+def _folder_name(artists: list[str]) -> str:
+    """Folder name for the artist — first entry, or empty string."""
+    return artists[0] if artists else ""
 
 
 # ---------------------------------------------------------------------------
@@ -101,10 +104,21 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         val = tags.get(key)
         return str(val[0]).strip() if val else ""
 
+    def _id3_list(key: str) -> list[str]:
+        frame = tags.get(key)
+        if not frame or not frame.text:
+            return []
+        items: list[str] = []
+        for v in frame.text:
+            s = str(v).strip()
+            if s:
+                items.extend(split_artist(s) or [s])
+        return items
+
     if is_id3:
         title = _id3("TIT2")
-        artist = _id3("TPE1")
-        album_artist = _id3("TPE2")
+        artists = _id3_list("TPE1")
+        album_artists = _id3_list("TPE2")
         album = _id3("TALB")
         release_year = _id3("TDRC")
 
@@ -132,10 +146,8 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
     else:
         # Vorbis comment (FLAC, OGG, Opus…)
         title = _vorbis("title")
-        artist = (
-            ", ".join(v.strip() for v in (tags.get("artist") or []) if v.strip()) or ""
-        )
-        album_artist = _vorbis("albumartist")
+        artists = _to_list(tags.get("artist") or [])
+        album_artists = _to_list(tags.get("albumartist") or [])
         album = _vorbis("album")
         release_year = _vorbis("date")
 
@@ -156,14 +168,15 @@ def read_tags(path: str, file_name: str, index: int) -> TrackMeta:
         language = _vorbis("language")
         lyrics = _vorbis("lyrics") or _vorbis("unsyncedlyrics") or None
 
-    artist, title = _normalize_artists(artist, title)
-    # album_artist must always match artist — never use a separate value
+    # album_artists defaults to artists when the tag wasn't set or matches
+    if not album_artists:
+        album_artists = list(artists)
     return TrackMeta(
         temp_path=path,
         file_name=file_name,
         title=title,
-        artist=artist,
-        album_artist=artist,
+        artists=artists,
+        album_artists=album_artists,
         album=album,
         release_year=release_year,
         track_number=track_number,
@@ -184,8 +197,8 @@ def _empty_meta(
         temp_path=path,
         file_name=file_name,
         title="",
-        artist="",
-        album_artist="",
+        artists=[],
+        album_artists=[],
         album="",
         release_year="",
         track_number=index,
@@ -220,13 +233,20 @@ def process_album(req: ProcessRequest) -> list[str]:
 
     Returns the list of remote paths.
     """
-    from services.sftp import upload_file, album_path, track_path, upload_cover, write_album_file
+    from services.sftp import (
+        album_path,
+        track_path,
+        upload_cover,
+        upload_file,
+        write_album_file,
+    )
     from soundcloud.tagger import embed_tags
-    from fix_artists import sanitize_m4a_streams, split_artist_tag
+    from fix_artists import sanitize_m4a_streams
     import base64
 
-    if not req.album_artist:
-        req = req.model_copy(update={"album_artist": req.artist})
+    if not req.album_artists:
+        req = req.model_copy(update={"album_artists": list(req.artists)})
+    folder_artist = _folder_name(req.album_artists)
 
     # Decode shared album cover
     shared_cover: Optional[bytes] = None
@@ -248,9 +268,9 @@ def process_album(req: ProcessRequest) -> list[str]:
         ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
         fname = _track_filename(t, req.is_single, ext)
         if req.is_single:
-            remote_path = track_path(_safe(req.album_artist), fname)
+            remote_path = track_path(_safe(folder_artist), fname)
         else:
-            remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
+            remote_path = album_path(_safe(folder_artist), _safe(req.album), fname)
 
         # Per-track cover takes priority over album cover
         cover: Optional[bytes] = shared_cover
@@ -262,8 +282,8 @@ def process_album(req: ProcessRequest) -> list[str]:
 
         meta = {
             "title": t.title,
-            "artist": req.artist,
-            "album_artist": req.album_artist,
+            "artists": list(req.artists),
+            "album_artists": list(req.album_artists),
             "album": "" if req.is_single else req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
@@ -277,7 +297,6 @@ def process_album(req: ProcessRequest) -> list[str]:
             )
             sanitize_m4a_streams(t.temp_path)
             embed_tags(t.temp_path, meta, cover)
-            split_artist_tag(t.temp_path)
         except Exception as exc:
             logger.warning("Could not embed tags into %s: %s", t.temp_path, exc)
 
@@ -294,8 +313,11 @@ def process_album(req: ProcessRequest) -> list[str]:
 
         saved.append(remote_path)
 
-    # Singles land directly under the artist folder — no cover.jpg or .album
+    # Singles land directly under the artist folder — no cover.jpg or
+    # .album file (cover is embedded in the track; no album to process).
     if not req.is_single:
+        # Upload cover.jpg into the album folder (use shared cover; fall back
+        # to the first track's individual cover if there is no shared one)
         cover_bytes: Optional[bytes] = shared_cover
         if cover_bytes is None and req.tracks:
             first_track_cover = req.tracks[0].cover_art_b64
@@ -306,14 +328,14 @@ def process_album(req: ProcessRequest) -> list[str]:
                     pass
         if cover_bytes:
             cover_path = upload_cover(
-                cover_bytes, _safe(req.album_artist), _safe(req.album)
+                cover_bytes, _safe(folder_artist), _safe(req.album)
             )
             if cover_path:
                 saved.append(cover_path)
                 logger.info("Uploaded cover.jpg → %s", cover_path)
 
         album_file_path = write_album_file(
-            _safe(req.album_artist), _safe(req.album), needs_processing
+            _safe(folder_artist), _safe(req.album), needs_processing
         )
         if album_file_path:
             saved.append(album_file_path)
@@ -351,8 +373,13 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
     from soundcloud.tagger import embed_tags
-    from fix_artists import split_artist_tag
-    from services.sftp import upload_file, album_path, track_path, upload_cover, write_album_file
+    from services.sftp import (
+        album_path,
+        track_path,
+        upload_cover,
+        upload_file,
+        write_album_file,
+    )
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -360,8 +387,9 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
         loop = asyncio.get_event_loop()
         return loop.run_in_executor(_executor, fn, *args)
 
-    if not req.album_artist:
-        req = req.model_copy(update={"album_artist": req.artist})
+    if not req.album_artists:
+        req = req.model_copy(update={"album_artists": list(req.artists)})
+    folder_artist = _folder_name(req.album_artists)
 
     # Decode shared album cover (used when a track has no individual cover)
     shared_cover: Optional[bytes] = None
@@ -390,10 +418,11 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
         if first_cover is None and cover:
             first_cover = cover
 
+        track_artists = list(t.artists) if t.artists else list(req.artists)
         meta = {
             "title": t.title,
-            "artist": t.artist or req.artist,
-            "album_artist": req.album_artist,
+            "artists": track_artists,
+            "album_artists": list(req.album_artists),
             "album": "" if req.is_single else req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
@@ -408,12 +437,11 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             downloaded_exts.add(ext)
             fname = _track_filename(t, req.is_single, ext)
             if req.is_single:
-                remote_path = track_path(_safe(req.album_artist), fname)
+                remote_path = track_path(_safe(folder_artist), fname)
             else:
-                remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
+                remote_path = album_path(_safe(folder_artist), _safe(req.album), fname)
 
             embed_tags(raw_file, meta, cover)
-            split_artist_tag(raw_file)
 
             logger.info("Uploading via SFTP: %s → %s", fname, remote_path)
             await _run_in_thread(upload_file, raw_file, remote_path)
@@ -422,12 +450,13 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
 
         saved.append(remote_path)
 
-    # Singles land directly under the artist folder — skip cover.jpg and .album
+    # Singles land directly under the artist folder — skip cover.jpg and
+    # .album control file (no album to scan).
     if not req.is_single:
         cover_bytes: Optional[bytes] = shared_cover or first_cover
         if cover_bytes:
             cover_path = await _run_in_thread(
-                upload_cover, cover_bytes, _safe(req.album_artist), _safe(req.album)
+                upload_cover, cover_bytes, _safe(folder_artist), _safe(req.album)
             )
             if cover_path:
                 saved.append(cover_path)
@@ -435,7 +464,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
 
         needs_processing = len(downloaded_exts) > 1
         album_file_path = await _run_in_thread(
-            write_album_file, _safe(req.album_artist), _safe(req.album), needs_processing
+            write_album_file, _safe(folder_artist), _safe(req.album), needs_processing
         )
         if album_file_path:
             saved.append(album_file_path)

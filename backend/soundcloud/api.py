@@ -81,14 +81,17 @@ def _fetch_cover_cached(artwork_url: Optional[str]) -> Optional[bytes]:
 
 
 def _parse_track(raw: dict, index: int, total: int) -> dict:
+    from fix_artists import split_artist
+
     pub_meta = raw.get("publisher_metadata") or {}
 
     title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
-    artist = (
+    artist_raw = (
         pub_meta.get("artist")
         or raw.get("user", {}).get("username")
         or "Unknown Artist"
     )
+    artists = split_artist(artist_raw) or [artist_raw.strip()]
     album = pub_meta.get("album_title") or ""
 
     # Prefer the explicit release date from publisher metadata;
@@ -109,8 +112,8 @@ def _parse_track(raw: dict, index: int, total: int) -> dict:
 
     return dict(
         title=title,
-        artist=artist,
-        album_artist=artist,
+        artists=artists,
+        album_artists=artists,
         album=album,
         release_year=release_year,
         track_number=track_number,
@@ -151,8 +154,8 @@ def _parse_playlist(playlist: dict) -> dict:
     return dict(
         zip_name=playlist.get("permalink_url") or playlist.get("title") or "Unknown",
         tracks=full_tracks,
-        artist=first["artist"],
-        album_artist=first["artist"],
+        artists=list(first["artists"]),
+        album_artists=list(first["artists"]),
         album=playlist.get("title") or first["album"] or "Unknown Album",
         release_year=first["release_year"],
         cover_art_b64=cover_b64,

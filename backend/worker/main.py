@@ -29,15 +29,10 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
     req = ProcessRequest(**req_dict)
 
-    if not req.album_artist:
-        req = req.model_copy(update={"album_artist": req.artist})
-    if req.is_single and not req.album:
-        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
-
     logger.info(
-        "[job %s] process_album_task: artist=%r album=%r tracks=%d",
+        "[job %s] process_album_task: artists=%r album=%r tracks=%d",
         ctx["job_id"],
-        req.artist,
+        req.artists,
         req.album,
         len(req.tracks),
     )
@@ -62,9 +57,9 @@ async def sc_process_task(ctx, req_dict: dict) -> dict:
     req = ScProcessRequest(**req_dict)
 
     logger.info(
-        "[job %s] sc_process_task: artist=%r album=%r tracks=%d",
+        "[job %s] sc_process_task: artists=%r album=%r tracks=%d",
         ctx["job_id"],
-        req.artist,
+        req.artists,
         req.album,
         len(req.tracks),
     )
@@ -96,8 +91,6 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 
     all_saved: list[str] = []
     for album_req in req.albums:
-        if not album_req.album_artist:
-            album_req = album_req.model_copy(update={"album_artist": album_req.artist})
         if not album_req.album:
             raise ValueError("album is required for each entry")
 
@@ -148,12 +141,12 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
                 dest_dir=tmp_dir,
             )
 
-            # 2. Override text tags with user-edited title / artist,
+            # 2. Override text tags with user-edited title / artists,
             #    preserving the embedded thumbnail added by yt-dlp.
             retag_mp3(
                 mp3_path,
                 title=track.title,
-                artist=track.artist,
+                artists=list(track.artists),
                 album="",
             )
 
@@ -164,7 +157,8 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
             # 4. Upload to SFTP  →  <artist>/<title>.mp3
             ext = os.path.splitext(mp3_path)[1].lower() or ".mp3"
             fname = _safe(track.title) + ext
-            remote = track_path(_safe(track.artist), fname)
+            folder = _safe(track.artists[0]) if track.artists else "Unknown"
+            remote = track_path(folder, fname)
             upload_file(mp3_path, remote)
 
             return remote

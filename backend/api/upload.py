@@ -48,20 +48,20 @@ async def upload(files: list[UploadFile]):
         meta = read_tags(tmp, safe_name, i)
         logger.info(
             "Uploaded [%d/%d]: %r\n"
-            "  title        = %r\n"
-            "  artist       = %r\n"
-            "  album_artist = %r\n"
-            "  album        = %r\n"
-            "  release_year = %r\n"
-            "  track_number = %r\n"
-            "  cover_art    = %s\n"
-            "  temp_path    = %s",
+            "  title         = %r\n"
+            "  artists       = %r\n"
+            "  album_artists = %r\n"
+            "  album         = %r\n"
+            "  release_year  = %r\n"
+            "  track_number  = %r\n"
+            "  cover_art     = %s\n"
+            "  temp_path     = %s",
             i,
             len(files),
             safe_name,
             meta.title,
-            meta.artist,
-            meta.album_artist,
+            meta.artists,
+            meta.album_artists,
             meta.album,
             meta.release_year,
             meta.track_number,
@@ -113,11 +113,11 @@ async def upload_zip(files: list[UploadFile]):
         for i, fname, path in extracted:
             meta = read_tags(path, fname, i)
             logger.info(
-                "zip %r track %d: title=%r artist=%r album=%r",
+                "zip %r track %d: title=%r artists=%r album=%r",
                 zf.filename,
                 i,
                 meta.title,
-                meta.artist,
+                meta.artists,
                 meta.album,
             )
             tracks.append(meta)
@@ -127,8 +127,8 @@ async def upload_zip(files: list[UploadFile]):
             AlbumMeta(
                 zip_name=zf.filename or "archive.zip",
                 tracks=tracks,
-                artist=first.artist,
-                album_artist=first.album_artist or first.artist,
+                artists=list(first.artists),
+                album_artists=list(first.album_artists or first.artists),
                 album=first.album,
                 release_year=first.release_year,
                 cover_art_b64=first.cover_art_b64,

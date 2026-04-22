@@ -78,18 +78,28 @@ def download_youtube_track(video_id: str, dest_dir: str) -> str:
     raise RuntimeError(f"yt-dlp produced no MP3 for {video_id}")
 
 
-def retag_mp3(path: str, title: str, artist: str, album: str) -> None:
+def retag_mp3(path: str, title: str, artists, album: str) -> None:
     """
     Update the ID3 text tags in an MP3 file without touching the existing
     APIC (cover art) frame embedded by yt-dlp.
     Keeps all other frames (APIC, etc.) intact — only overwrites TIT2/TPE1/
     TPE2/TALB/TRCK/TDRC.
+
+    *artists* may be a string (split on common separators) or a list of
+    strings.  Written as a multi-value TPE1/TPE2 frame in ID3v2.4.
     """
     try:
         from mutagen.id3 import ID3, ID3NoHeaderError, TALB, TDRC, TIT2, TPE1, TPE2, TRCK
     except ImportError:
         logger.warning("mutagen not installed — skipping tag override for %s", path)
         return
+
+    if isinstance(artists, str):
+        from fix_artists import split_artist
+
+        parts = split_artist(artists) or ([artists.strip()] if artists.strip() else [])
+    else:
+        parts = [str(a).strip() for a in (artists or []) if str(a).strip()]
 
     try:
         try:
@@ -98,21 +108,21 @@ def retag_mp3(path: str, title: str, artist: str, album: str) -> None:
             tags = ID3()
 
         tags["TIT2"] = TIT2(encoding=3, text=title)
-        tags["TPE1"] = TPE1(encoding=3, text=artist)
-        tags["TPE2"] = TPE2(encoding=3, text=artist)
+        tags["TPE1"] = TPE1(encoding=3, text=parts)
+        tags["TPE2"] = TPE2(encoding=3, text=parts)
         tags["TALB"] = TALB(encoding=3, text=album)
         tags["TDRC"] = TDRC(encoding=3, text="")
         tags["TRCK"] = TRCK(encoding=3, text="1")
-        tags.save(path, v2_version=3)
+        tags.save(path, v2_version=4)
     except Exception as exc:
         logger.warning("retag_mp3 failed for %s: %s", path, exc)
 
 
 def fix_track(path: str) -> None:
-    """Run the fix_artists pipeline on a single file. Non-fatal."""
-    from fix_artists import process_file
+    """Sanitize M4A streams for a single file. Non-fatal."""
+    from fix_artists import sanitize_m4a_streams
 
     try:
-        process_file(path)
+        sanitize_m4a_streams(path)
     except Exception as exc:
-        logger.warning("fix_artists failed for %s (non-fatal): %s", path, exc)
+        logger.warning("sanitize_m4a_streams failed for %s (non-fatal): %s", path, exc)
