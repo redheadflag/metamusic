@@ -108,94 +108,6 @@ async def process_bulk_task(ctx, req_dict: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# task: yt_import_task  (POST /api/yt-import)
-# ---------------------------------------------------------------------------
-
-
-async def yt_import_task(ctx, req_dict: dict) -> dict:
-    """Download YouTube tracks and upload to the music library via SFTP."""
-    import asyncio
-    import os
-    import re
-    import shutil
-    import tempfile
-    from concurrent.futures import ThreadPoolExecutor
-
-    from models import YtImportRequest
-    from services.sftp import track_path, upload_file
-    from youtube.downloader import download_youtube_track, fix_track, retag_mp3
-
-    req = YtImportRequest(**req_dict)
-
-    _executor = ThreadPoolExecutor(max_workers=2)
-
-    def _safe(s: str) -> str:
-        return re.sub(r'[\\/*?:"<>|]', "_", s).strip()
-
-    def _download_and_upload(track) -> str:
-        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
-        try:
-            # 1. Download as MP3 (yt-dlp embeds YouTube metadata)
-            mp3_path = download_youtube_track(
-                video_id=track.video_id,
-                dest_dir=tmp_dir,
-            )
-
-            # 2. Override text tags with user-edited title / artists,
-            #    preserving the embedded thumbnail added by yt-dlp.
-            retag_mp3(
-                mp3_path,
-                title=track.title,
-                artists=list(track.artists),
-                album="",
-            )
-
-            # 3. Sanitize streams + split multi-value artist tags
-            #    (non-fatal; logged as warning on failure)
-            fix_track(mp3_path)
-
-            # 4. Upload to SFTP  →  <artist>/<title>.mp3
-            ext = os.path.splitext(mp3_path)[1].lower() or ".mp3"
-            fname = _safe(track.title) + ext
-            folder = _safe(track.artists[0]) if track.artists else "Unknown"
-            remote = track_path(folder, fname)
-            upload_file(mp3_path, remote)
-
-            return remote
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    loop = asyncio.get_running_loop()
-    results: list[dict] = []
-
-    for track in req.tracks:
-        if track.in_navidrome or track.skip:
-            continue
-        try:
-            path = await loop.run_in_executor(
-                _executor, _download_and_upload, track
-            )
-            results.append({"video_id": track.video_id, "status": "ok", "path": path})
-            logger.info(
-                "[job %s] YT downloaded: %s → %s",
-                ctx["job_id"], track.video_id, path,
-            )
-        except Exception as exc:
-            logger.error(
-                "[job %s] YT download failed for %s: %s",
-                ctx["job_id"], track.video_id, exc,
-            )
-            results.append({
-                "video_id": track.video_id,
-                "status": "error",
-                "error": str(exc),
-            })
-
-    await _post_process()
-    return {"results": results}
-
-
-# ---------------------------------------------------------------------------
 # WorkerSettings — picked up by `arq worker.main.WorkerSettings`
 # ---------------------------------------------------------------------------
 
@@ -209,7 +121,6 @@ class WorkerSettings:
         process_album_task,
         sc_process_task,
         process_bulk_task,
-        yt_import_task,
     ]
 
     redis_settings = get_redis_settings()

@@ -14,12 +14,15 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
       UPLOAD_DIR: /app/uploads
+      DOWNLOAD_QUEUE_DB: /app/data/queue.db
+      YT_PULLER_TOKEN: ${YT_PULLER_TOKEN}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
       - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
       - uploads:/app/uploads
+      - queue_db:/app/data
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -41,12 +44,14 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
       UPLOAD_DIR: /app/uploads
+      DOWNLOAD_QUEUE_DB: /app/data/queue.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
       - ${SFTP_KEY_FILE}:/app/secrets/sftp_key:ro
       - uploads:/app/uploads
+      - queue_db:/app/data
     depends_on:
       - redis
     develop:
@@ -75,3 +80,4 @@ services:
 volumes:
   uploads:
   bot_db:
+  queue_db:

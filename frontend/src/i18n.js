@@ -73,6 +73,8 @@ export const translations = {
     ytSkip:           "Skip",
     ytUnskip:         "Undo skip",
     edit:             "Edit",
+    ytQueued:         (queued, matched) => `${queued} track${queued !== 1 ? "s" : ""} queued for download, ${matched} already in library`,
+    ytViewQueue:      "View download queue",
 
     // App states
     uploadingLabel:   "Uploading…",
@@ -162,6 +164,8 @@ export const translations = {
     ytSkip:           "Пропустить",
     ytUnskip:         "Отмена",
     edit:             "Изменить",
+    ytQueued:         (queued, matched) => `${queued} ${queued === 1 ? "трек поставлен" : queued < 5 ? "трека поставлено" : "треков поставлено"} в очередь, ${matched} уже в библиотеке`,
+    ytViewQueue:      "Смотреть очередь загрузки",
 
     // App states
     uploadingLabel:   "Загрузка…",

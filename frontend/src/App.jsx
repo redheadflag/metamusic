@@ -6,6 +6,7 @@ import ScInput         from "./ScInput.jsx";
 import MetaEditor      from "./MetaEditor.jsx";
 import BulkEditor      from "./BulkEditor.jsx";
 import PlaylistImport  from "./PlaylistImport.jsx";
+import YtQueuePanel    from "./YtQueuePanel.jsx";
 
 const API = "/api";
 
@@ -122,14 +123,16 @@ async function enqueueJob(url, body) {
 function AppInner() {
   const { t } = useLang();
 
-  const [mode,      setMode]      = useState(null);
-  const [state,     setState]     = useState("idle");
-  const [progress,  setProgress]  = useState(0);
-  const [jobStatus, setJobStatus] = useState(null);
-  const [tracks,    setTracks]    = useState([]);
-  const [albums,    setAlbums]    = useState([]);
-  const [saved,     setSaved]     = useState([]);
-  const [error,     setError]     = useState(null);
+  const [mode,           setMode]           = useState(null);
+  const [state,          setState]          = useState("idle");
+  const [progress,       setProgress]       = useState(0);
+  const [jobStatus,      setJobStatus]      = useState(null);
+  const [tracks,         setTracks]         = useState([]);
+  const [albums,         setAlbums]         = useState([]);
+  const [saved,          setSaved]          = useState([]);
+  const [error,          setError]          = useState(null);
+  const [ytImportStats,  setYtImportStats]  = useState(null);
+  const [showQueue,      setShowQueue]      = useState(false);
 
   // ── file upload ────────────────────────────────────────────────────────
   async function handleFiles(files, type) {
@@ -198,6 +201,10 @@ function AppInner() {
 
   // ── YouTube playlist import ───────────────────────────────────────────
   async function handleYtImport(importReq) {
+    const queued      = importReq.tracks.filter(t => !t.in_navidrome && !t.skip).length;
+    const inNavidrome = importReq.tracks.filter(t => t.in_navidrome).length;
+    setYtImportStats({ queued, inNavidrome });
+    setShowQueue(false);
     setState("saving");
     setError(null);
     try {
@@ -246,6 +253,8 @@ function AppInner() {
     setProgress(0); setJobStatus(null);
     setState("idle");
     setError(null);
+    setYtImportStats(null);
+    setShowQueue(false);
   }
 
   function backToMode() {
@@ -311,11 +320,14 @@ function AppInner() {
       )}
 
       {/* YouTube playlist import */}
-      {state === "yt-input" && (
+      {state === "yt-input" && !showQueue && (
         <PlaylistImport
           onBack={() => { setMode(null); setState("idle"); }}
           onImport={handleYtImport}
         />
+      )}
+      {state === "yt-input" && showQueue && (
+        <YtQueuePanel onBack={() => setShowQueue(false)} />
       )}
 
       {/* Upload progress */}
@@ -340,18 +352,31 @@ function AppInner() {
       )}
 
       {/* Sent — job enqueued, user can go back immediately */}
-      {state === "sent" && (
+      {state === "sent" && !showQueue && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <p style={{ color: "var(--accent)", fontWeight: 500, fontSize: 15 }}>
             {t("jobSentTitle")}
           </p>
           <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.6, margin: 0 }}>
-            {t("jobSentNote")}
+            {ytImportStats
+              ? t("ytQueued", ytImportStats.queued, ytImportStats.inNavidrome)
+              : t("jobSentNote")}
           </p>
-          <div>
+          <div style={{ display: "flex", gap: 10 }}>
             <button onClick={reset}>{t("goBack")}</button>
+            {ytImportStats && (
+              <button
+                onClick={() => setShowQueue(true)}
+                style={{ opacity: 0.7 }}
+              >
+                {t("ytViewQueue")}
+              </button>
+            )}
           </div>
         </div>
+      )}
+      {state === "sent" && showQueue && (
+        <YtQueuePanel onBack={() => setShowQueue(false)} />
       )}
 
       {state === "done" && (
