@@ -220,15 +220,13 @@ def process_album(req: ProcessRequest) -> list[str]:
 
     Returns the list of remote paths.
     """
-    from services.sftp import upload_file, album_path, upload_cover, write_album_file
+    from services.sftp import upload_file, album_path, track_path, upload_cover, write_album_file
     from soundcloud.tagger import embed_tags
     from fix_artists import sanitize_m4a_streams, split_artist_tag
     import base64
 
     if not req.album_artist:
         req = req.model_copy(update={"album_artist": req.artist})
-    if req.is_single and not req.album:
-        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
     # Decode shared album cover
     shared_cover: Optional[bytes] = None
@@ -249,7 +247,10 @@ def process_album(req: ProcessRequest) -> list[str]:
     for t in req.tracks:
         ext = os.path.splitext(t.temp_path)[1].lower() or ".mp3"
         fname = _track_filename(t, req.is_single, ext)
-        remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
+        if req.is_single:
+            remote_path = track_path(_safe(req.album_artist), fname)
+        else:
+            remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
 
         # Per-track cover takes priority over album cover
         cover: Optional[bytes] = shared_cover
@@ -263,7 +264,7 @@ def process_album(req: ProcessRequest) -> list[str]:
             "title": t.title,
             "artist": req.artist,
             "album_artist": req.album_artist,
-            "album": req.album,
+            "album": "" if req.is_single else req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
         }
@@ -293,30 +294,29 @@ def process_album(req: ProcessRequest) -> list[str]:
 
         saved.append(remote_path)
 
-    # Upload cover.jpg into the album folder (use shared cover; fall back to
-    # the first track's individual cover if there is no shared one)
-    cover_bytes: Optional[bytes] = shared_cover
-    if cover_bytes is None and req.tracks:
-        first_track_cover = req.tracks[0].cover_art_b64
-        if first_track_cover:
-            try:
-                cover_bytes = base64.b64decode(first_track_cover)
-            except Exception:
-                pass
-    if cover_bytes:
-        cover_path = upload_cover(
-            cover_bytes, _safe(req.album_artist), _safe(req.album)
-        )
-        if cover_path:
-            saved.append(cover_path)
-            logger.info("Uploaded cover.jpg → %s", cover_path)
+    # Singles land directly under the artist folder — no cover.jpg or .album
+    if not req.is_single:
+        cover_bytes: Optional[bytes] = shared_cover
+        if cover_bytes is None and req.tracks:
+            first_track_cover = req.tracks[0].cover_art_b64
+            if first_track_cover:
+                try:
+                    cover_bytes = base64.b64decode(first_track_cover)
+                except Exception:
+                    pass
+        if cover_bytes:
+            cover_path = upload_cover(
+                cover_bytes, _safe(req.album_artist), _safe(req.album)
+            )
+            if cover_path:
+                saved.append(cover_path)
+                logger.info("Uploaded cover.jpg → %s", cover_path)
 
-    # Write .album control file
-    album_file_path = write_album_file(
-        _safe(req.album_artist), _safe(req.album), needs_processing
-    )
-    if album_file_path:
-        saved.append(album_file_path)
+        album_file_path = write_album_file(
+            _safe(req.album_artist), _safe(req.album), needs_processing
+        )
+        if album_file_path:
+            saved.append(album_file_path)
 
     # If all tracks came from a zip subdir, remove the now-empty directory
     dirs = {os.path.dirname(t.temp_path) for t in req.tracks}
@@ -352,7 +352,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     from soundcloud.downloader import download_raw
     from soundcloud.tagger import embed_tags
     from fix_artists import split_artist_tag
-    from services.sftp import upload_file, album_path, upload_cover, write_album_file
+    from services.sftp import upload_file, album_path, track_path, upload_cover, write_album_file
 
     _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -362,8 +362,6 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
 
     if not req.album_artist:
         req = req.model_copy(update={"album_artist": req.artist})
-    if req.is_single and not req.album:
-        req = req.model_copy(update={"album": f"{req.tracks[0].title} (Single)"})
 
     # Decode shared album cover (used when a track has no individual cover)
     shared_cover: Optional[bytes] = None
@@ -396,7 +394,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             "title": t.title,
             "artist": t.artist or req.artist,
             "album_artist": req.album_artist,
-            "album": req.album,
+            "album": "" if req.is_single else req.album,
             "release_year": req.release_year,
             "track_number": t.track_number,
         }
@@ -409,7 +407,10 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             ext = os.path.splitext(raw_file)[1].lower()
             downloaded_exts.add(ext)
             fname = _track_filename(t, req.is_single, ext)
-            remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
+            if req.is_single:
+                remote_path = track_path(_safe(req.album_artist), fname)
+            else:
+                remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
 
             embed_tags(raw_file, meta, cover)
             split_artist_tag(raw_file)
@@ -421,23 +422,22 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
 
         saved.append(remote_path)
 
-    # Upload cover.jpg into the album folder once, after all tracks
-    cover_bytes: Optional[bytes] = shared_cover or first_cover
-    if cover_bytes:
-        cover_path = await _run_in_thread(
-            upload_cover, cover_bytes, _safe(req.album_artist), _safe(req.album)
+    # Singles land directly under the artist folder — skip cover.jpg and .album
+    if not req.is_single:
+        cover_bytes: Optional[bytes] = shared_cover or first_cover
+        if cover_bytes:
+            cover_path = await _run_in_thread(
+                upload_cover, cover_bytes, _safe(req.album_artist), _safe(req.album)
+            )
+            if cover_path:
+                saved.append(cover_path)
+                logger.info("Uploaded cover.jpg → %s", cover_path)
+
+        needs_processing = len(downloaded_exts) > 1
+        album_file_path = await _run_in_thread(
+            write_album_file, _safe(req.album_artist), _safe(req.album), needs_processing
         )
-        if cover_path:
-            saved.append(cover_path)
-            logger.info("Uploaded cover.jpg → %s", cover_path)
-
-    # Write .album control file — needs_processing if mixed extensions landed
-    needs_processing = len(downloaded_exts) > 1
-    album_file_path = await _run_in_thread(
-        write_album_file, _safe(req.album_artist), _safe(req.album), needs_processing
-    )
-    if album_file_path:
-        saved.append(album_file_path)
-
+        if album_file_path:
+            saved.append(album_file_path)
 
     return saved

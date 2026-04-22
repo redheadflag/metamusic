@@ -131,6 +131,15 @@ def album_path(album_artist: str, album: str, filename: str) -> str:
     return str(PurePosixPath(SFTP_BASE) / album_artist / album / filename)
 
 
+def track_path(artist: str, filename: str) -> str:
+    """
+    Build the remote path for a single track directly in the artist folder.
+
+      → <SFTP_BASE>/<artist>/<filename>
+    """
+    return str(PurePosixPath(SFTP_BASE) / artist / filename)
+
+
 def upload_file(local_path: str, remote_path: str) -> None:
     """Upload a local file to an absolute remote path under SFTP_BASE."""
     _conn.upload(local_path, remote_path)

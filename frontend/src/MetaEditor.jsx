@@ -197,16 +197,6 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
         </div>
       </div>
 
-      {isSingle && (
-        <div style={{
-          fontSize: 12, color: "var(--text)", opacity: 0.5,
-          padding: "8px 10px", borderRadius: 7,
-          border: "1px solid var(--border)", background: "var(--code-bg)",
-        }}>
-          {t("singleHint")} <em>{rows[0]?.title.trim() || t("trackLabel")} {t("singleHintSuffix")}</em>
-        </div>
-      )}
-
       <div style={{ borderTop: "1px solid var(--border)" }} />
 
       {/* Track list */}

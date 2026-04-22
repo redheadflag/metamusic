@@ -129,7 +129,7 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
     from concurrent.futures import ThreadPoolExecutor
 
     from models import YtImportRequest
-    from services.sftp import album_path, upload_file, write_album_file
+    from services.sftp import track_path, upload_file
     from youtube.downloader import download_youtube_track, fix_track, retag_mp3
 
     req = YtImportRequest(**req_dict)
@@ -154,22 +154,18 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
                 mp3_path,
                 title=track.title,
                 artist=track.artist,
-                album=f"{track.title} (Single)",
+                album="",
             )
 
             # 3. Sanitize streams + split multi-value artist tags
             #    (non-fatal; logged as warning on failure)
             fix_track(mp3_path)
 
-            # 4. Upload to SFTP  →  <artist>/<title> (Single)/<title>.mp3
+            # 4. Upload to SFTP  →  <artist>/<title>.mp3
             ext = os.path.splitext(mp3_path)[1].lower() or ".mp3"
-            album_name = f"{_safe(track.title)} (Single)"
             fname = _safe(track.title) + ext
-            remote = album_path(_safe(track.artist), album_name, fname)
+            remote = track_path(_safe(track.artist), fname)
             upload_file(mp3_path, remote)
-
-            # 5. Write .album control file (no format conversion needed for MP3)
-            write_album_file(_safe(track.artist), album_name, needs_processing=False)
 
             return remote
         finally:
