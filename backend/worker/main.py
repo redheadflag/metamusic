@@ -130,7 +130,7 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
 
     from models import YtImportRequest
     from services.sftp import album_path, upload_file, write_album_file
-    from youtube.downloader import download_youtube_track, retag_mp3, run_fix_artists
+    from youtube.downloader import download_youtube_track, fix_track, retag_mp3
 
     req = YtImportRequest(**req_dict)
 
@@ -157,9 +157,9 @@ async def yt_import_task(ctx, req_dict: dict) -> dict:
                 album=f"{track.title} (Single)",
             )
 
-            # 3. Run fix-artists.sh to split multi-value artist tags
+            # 3. Sanitize streams + split multi-value artist tags
             #    (non-fatal; logged as warning on failure)
-            run_fix_artists(tmp_dir)
+            fix_track(mp3_path)
 
             # 4. Upload to SFTP  →  <artist>/<title> (Single)/<title>.mp3
             ext = os.path.splitext(mp3_path)[1].lower() or ".mp3"

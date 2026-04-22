@@ -222,7 +222,7 @@ def process_album(req: ProcessRequest) -> list[str]:
     """
     from services.sftp import upload_file, album_path, upload_cover, write_album_file
     from soundcloud.tagger import embed_tags
-    from soundcloud.downloader import sanitize_m4a_streams
+    from fix_artists import sanitize_m4a_streams, split_artist_tag
     import base64
 
     if not req.album_artist:
@@ -276,6 +276,7 @@ def process_album(req: ProcessRequest) -> list[str]:
             )
             sanitize_m4a_streams(t.temp_path)
             embed_tags(t.temp_path, meta, cover)
+            split_artist_tag(t.temp_path)
         except Exception as exc:
             logger.warning("Could not embed tags into %s: %s", t.temp_path, exc)
 
@@ -350,6 +351,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
     from concurrent.futures import ThreadPoolExecutor
     from soundcloud.downloader import download_raw
     from soundcloud.tagger import embed_tags
+    from fix_artists import split_artist_tag
     from services.sftp import upload_file, album_path, upload_cover, write_album_file
 
     _executor = ThreadPoolExecutor(max_workers=4)
@@ -410,6 +412,7 @@ async def process_sc_album(req: ScProcessRequest) -> list[str]:
             remote_path = album_path(_safe(req.album_artist), _safe(req.album), fname)
 
             embed_tags(raw_file, meta, cover)
+            split_artist_tag(raw_file)
 
             logger.info("Uploading via SFTP: %s → %s", fname, remote_path)
             await _run_in_thread(upload_file, raw_file, remote_path)

@@ -108,37 +108,11 @@ def retag_mp3(path: str, title: str, artist: str, album: str) -> None:
         logger.warning("retag_mp3 failed for %s: %s", path, exc)
 
 
-def run_fix_artists(directory: str) -> None:
-    """
-    Run fix-artists.sh on *directory* to split multi-value artist tags.
-    Non-fatal: logs a warning on failure.
-
-    Requires zsh and ffprobe (both installed in the backend container).
-    Script location: /app/fix-artists.sh (copied into the Docker image).
-    """
-    script = os.environ.get("FIX_ARTISTS_SCRIPT", "/app/fix-artists.sh")
-    if not os.path.exists(script):
-        logger.debug("fix-artists.sh not found at %s — skipping", script)
-        return
-
-    zsh = shutil.which("zsh")
-    if not zsh:
-        logger.warning("zsh not found — skipping fix-artists.sh")
-        return
+def fix_track(path: str) -> None:
+    """Run the fix_artists pipeline on a single file. Non-fatal."""
+    from fix_artists import process_file
 
     try:
-        result = subprocess.run(
-            [zsh, script, directory, "--write"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode == 0:
-            logger.info("fix-artists.sh: %s", result.stdout[-300:] or "OK")
-        else:
-            logger.warning(
-                "fix-artists.sh exited %d: %s",
-                result.returncode, result.stderr[-300:],
-            )
-    except subprocess.TimeoutExpired:
-        logger.warning("fix-artists.sh timed out for %s", directory)
+        process_file(path)
     except Exception as exc:
-        logger.warning("fix-artists.sh error (non-fatal): %s", exc)
+        logger.warning("fix_artists failed for %s (non-fatal): %s", path, exc)
