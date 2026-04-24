@@ -77,7 +77,6 @@ async def trigger_scan() -> None:
     """
     try:
         params = _subsonic_auth_params()
-        params["fullScan"] = "true"
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
