@@ -324,7 +324,7 @@ def process_job(job: dict) -> str:
     title: str = job["title"]
     artists: list[str] = job.get("artists") or []
     album_artists: list[str] = job.get("album_artists") or artists
-    album: str = job.get("album") or ""
+    album: str = job.get("album") or title
     release_year: str = job.get("release_year") or ""
     cover_art_b64: str | None = job.get("cover_art_b64") or None
     folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))

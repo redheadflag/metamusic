@@ -136,6 +136,7 @@ async def yt_import(req: YtImportRequest):
                 navidrome_playlists.create_or_update_playlist,
                 req.playlist_name,
                 nav_ids,
+                req.username,
             )
             logger.info("Navidrome playlist %r id=%s", req.playlist_name, playlist_id)
         except Exception as exc:

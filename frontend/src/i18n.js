@@ -78,6 +78,7 @@ export const translations = {
     ytLatencyWarning: "Tracks are downloaded in the background and will appear in your library after a short delay.",
     ytSingleTrack:    "Single video detected",
     ytAddToQueue:     "Add to download queue",
+    ytOwnerUsername:  "Navidrome username (playlist owner)",
 
     // Metadata fields (shared)
     albumArtistsLabel:   "Album artists",
@@ -176,6 +177,7 @@ export const translations = {
     ytLatencyWarning: "Треки скачиваются в фоне и появятся в библиотеке после небольшой задержки.",
     ytSingleTrack:    "Обнаружено отдельное видео",
     ytAddToQueue:     "Добавить в очередь загрузки",
+    ytOwnerUsername:  "Имя пользователя Navidrome (владелец плейлиста)",
 
     // Metadata fields (shared)
     albumArtistsLabel:   "Исполнители альбома",

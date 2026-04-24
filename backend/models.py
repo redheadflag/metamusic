@@ -228,4 +228,5 @@ class YtTrackImport(BaseModel):
 class YtImportRequest(BaseModel):
     """Request body for /api/yt-import."""
     playlist_name: str
+    username: str = ""
     tracks: list[YtTrackImport]

@@ -281,6 +281,7 @@ export default function PlaylistImport({ onBack, onImport }) {
   const { t } = useLang();
 
   const [url,         setUrl]         = useState("");
+  const [username,    setUsername]    = useState("");
   const [scanning,    setScanning]    = useState(false);
   const [playlist,    setPlaylist]    = useState(null);   // YtPlaylistScan
   const [tracks,      setTracks]      = useState([]);
@@ -348,6 +349,7 @@ export default function PlaylistImport({ onBack, onImport }) {
   function handlePlaylistImport() {
     onImport({
       playlist_name: playlist.playlist_name,
+      username:      username.trim(),
       tracks: tracks.map(t => ({
         video_id:     t.video_id,
         title:        t.title,
@@ -383,7 +385,7 @@ export default function PlaylistImport({ onBack, onImport }) {
       {/* Latency warning */}
       <LatencyWarning t={t} />
 
-      {/* URL input */}
+      {/* URL + username inputs */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <label style={{
           fontSize: 11,
@@ -411,6 +413,13 @@ export default function PlaylistImport({ onBack, onImport }) {
             {scanning ? t("ytScanning") : t("ytScan")}
           </button>
         </div>
+        <input
+          type="text"
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          placeholder={t("ytOwnerUsername")}
+          style={{ ...inputStyle, fontSize: 12, opacity: 0.8 }}
+        />
         {error && (
           <p style={{ margin: 0, color: "var(--danger)", fontSize: 13 }}>{error}</p>
         )}
