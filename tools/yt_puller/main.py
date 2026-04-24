@@ -1,3 +1,14 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "httpx>=0.27",
+#   "mutagen>=1.47",
+#   "paramiko>=3.4",
+#   "Pillow>=10",
+#   "yt-dlp>=2024.11",
+# ]
+# ///
+
 """
 tools/yt_puller/main.py
 ───────────────────────
@@ -20,6 +31,7 @@ Config — .env file in the same directory as this script:
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -29,11 +41,13 @@ import subprocess
 import tempfile
 import threading
 import time
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 
 import httpx
 import paramiko
-from mutagen.id3 import ID3, ID3NoHeaderError, TALB, TDRC, TIT2, TPE1, TPE2, TRCK
+from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TDRC, TIT2, TPE1, TPE2, TRCK
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +91,48 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 
 def _safe(s: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", s).strip()
+
+
+# ── artwork ───────────────────────────────────────────────────────────────────
+
+def _crop_to_square(img_data: bytes) -> bytes:
+    """Center-crop a landscape image to square (full height, trim equal sides).
+    Returns the original bytes unchanged if already square or portrait."""
+    with Image.open(BytesIO(img_data)) as img:
+        w, h = img.size
+        if w <= h:
+            return img_data
+        left = (w - h) // 2
+        img = img.crop((left, 0, left + h, h))
+        buf = BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=95)
+        return buf.getvalue()
+
+
+def _embed_cover(path: str, img_data: bytes) -> None:
+    try:
+        tags = ID3(path)
+    except ID3NoHeaderError:
+        tags = ID3()
+    tags.delall("APIC")
+    tags["APIC"] = APIC(encoding=0, mime="image/jpeg", type=3, desc="Cover", data=img_data)
+    tags.save(path, v2_version=4)
+
+
+def _crop_embedded_cover(path: str) -> None:
+    """Extract the embedded cover art, square-crop it, and re-embed."""
+    try:
+        tags = ID3(path)
+    except ID3NoHeaderError:
+        return
+    apic_keys = [k for k in tags if k.startswith("APIC")]
+    if not apic_keys:
+        return
+    apic = tags[apic_keys[0]]
+    cropped = _crop_to_square(apic.data)
+    if cropped is apic.data:
+        return
+    _embed_cover(path, cropped)
 
 
 # ── SFTP ──────────────────────────────────────────────────────────────────────
@@ -270,6 +326,7 @@ def process_job(job: dict) -> str:
     album_artists: list[str] = job.get("album_artists") or artists
     album: str = job.get("album") or ""
     release_year: str = job.get("release_year") or ""
+    cover_art_b64: str | None = job.get("cover_art_b64") or None
     folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))
 
     tmp_dir = tempfile.mkdtemp(prefix="yt_puller_")
@@ -283,6 +340,12 @@ def process_job(job: dict) -> str:
             album=album,
             release_year=release_year,
         )
+
+        if cover_art_b64:
+            raw = base64.b64decode(cover_art_b64)
+            _embed_cover(mp3_path, _crop_to_square(raw))
+        else:
+            _crop_embedded_cover(mp3_path)
 
         fname = _safe(title) + ".mp3"
         if album:

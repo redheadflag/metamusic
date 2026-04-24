@@ -146,10 +146,19 @@ const fieldInputStyle = {
 };
 
 function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
-  const [title,   setTitle]   = useState(videoMeta.title || "");
-  const [artists, setArtists] = useState(videoMeta.artists || []);
-  const [album,   setAlbum]   = useState("");
-  const [year,    setYear]    = useState("");
+  const [title,    setTitle]    = useState(videoMeta.title || "");
+  const [artists,  setArtists]  = useState(videoMeta.artists || []);
+  const [album,    setAlbum]    = useState("");
+  const [year,     setYear]     = useState("");
+  const [coverB64, setCoverB64] = useState(null);
+
+  function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setCoverB64(reader.result.split(",")[1]);
+    reader.readAsDataURL(file);
+  }
 
   const labelStyle = {
     fontSize: 11, fontWeight: 600, color: "var(--text)",
@@ -158,16 +167,17 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
 
   function handleSubmit() {
     onSubmit({
-      video_id:     videoMeta.video_id,
+      video_id:      videoMeta.video_id,
       title,
       artists,
       album_artists: artists,
       album,
       release_year:  year,
-      thumbnail:    videoMeta.thumbnail || null,
-      duration:     videoMeta.duration || null,
-      in_navidrome: false,
-      skip:         false,
+      thumbnail:     videoMeta.thumbnail || null,
+      cover_art_b64: coverB64 || null,
+      duration:      videoMeta.duration || null,
+      in_navidrome:  false,
+      skip:          false,
     });
   }
 
@@ -179,6 +189,28 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
       }}>
         {t("ytSingleTrack")}
       </div>
+
+      {/* Cover art */}
+      <label style={{ cursor: "pointer", alignSelf: "flex-start" }}>
+        <div style={{
+          width: 120, height: 120,
+          borderRadius: "var(--radius)",
+          border: "1px solid var(--border)",
+          background: "var(--code-bg)",
+          overflow: "hidden",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {coverB64
+            ? <img src={`data:image/jpeg;base64,${coverB64}`}
+                   style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : videoMeta.thumbnail
+              ? <img src={videoMeta.thumbnail}
+                     style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontSize: 11, color: "var(--text)", opacity: 0.5 }}>cover</span>
+          }
+        </div>
+        <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCoverFile} />
+      </label>
 
       {/* Title */}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -323,11 +355,12 @@ export default function PlaylistImport({ onBack, onImport }) {
         album_artists: t.album_artists || t.artists || [],
         album:        t.album || "",
         release_year: t.release_year || "",
-        thumbnail:    t.thumbnail || null,
-        duration:     t.duration,
-        in_navidrome: t.in_navidrome,
-        navidrome_id: t.navidrome_id || null,
-        skip:         t.skip,
+        thumbnail:     t.thumbnail || null,
+        cover_art_b64: t.cover_art_b64 || null,
+        duration:      t.duration,
+        in_navidrome:  t.in_navidrome,
+        navidrome_id:  t.navidrome_id || null,
+        skip:          t.skip,
       })),
     });
   }

@@ -203,6 +203,7 @@ class YtTrackImport(BaseModel):
     album: str = ""
     release_year: str = ""
     thumbnail: str | None = None
+    cover_art_b64: str | None = None
     duration: int | None = None
     in_navidrome: bool = False
     navidrome_id: str | None = None

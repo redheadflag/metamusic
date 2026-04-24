@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS yt_downloads (
     album         TEXT NOT NULL DEFAULT '',
     release_year  TEXT NOT NULL DEFAULT '',
     thumbnail     TEXT,
+    cover_art_b64 TEXT,
     duration      INTEGER,
     playlist_id   TEXT,
     playlist_name TEXT,
@@ -42,6 +43,7 @@ _MIGRATE = [
     "ALTER TABLE yt_downloads ADD COLUMN album TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE yt_downloads ADD COLUMN release_year TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE yt_downloads ADD COLUMN thumbnail TEXT",
+    "ALTER TABLE yt_downloads ADD COLUMN cover_art_b64 TEXT",
 ]
 
 
@@ -84,6 +86,7 @@ def enqueue(
     album: str,
     release_year: str,
     thumbnail: str | None,
+    cover_art_b64: str | None,
     duration,
     playlist_id,
     playlist_name,
@@ -95,8 +98,8 @@ def enqueue(
             """
             INSERT INTO yt_downloads
                 (video_id, title, artists, album_artists, album, release_year, thumbnail,
-                 duration, playlist_id, playlist_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cover_art_b64, duration, playlist_id, playlist_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 title=excluded.title,
                 artists=excluded.artists,
@@ -104,6 +107,7 @@ def enqueue(
                 album=excluded.album,
                 release_year=excluded.release_year,
                 thumbnail=excluded.thumbnail,
+                cover_art_b64=excluded.cover_art_b64,
                 status='pending',
                 error=NULL,
                 claimed_by=NULL,
@@ -119,6 +123,7 @@ def enqueue(
                 album or "",
                 release_year or "",
                 thumbnail,
+                cover_art_b64,
                 duration,
                 playlist_id,
                 playlist_name,

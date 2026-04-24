@@ -152,6 +152,7 @@ async def yt_import(req: YtImportRequest):
             track.album,
             track.release_year,
             track.thumbnail,
+            track.cover_art_b64,
             track.duration,
             playlist_id,
             req.playlist_name,

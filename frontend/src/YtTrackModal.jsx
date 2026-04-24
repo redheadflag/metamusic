@@ -24,13 +24,22 @@ const labelStyle = {
 export default function YtTrackModal({ track, onSave, onClose }) {
   const { t } = useLang();
 
-  const [title,   setTitle]   = useState(track.title || "");
-  const [artists, setArtists] = useState(track.artists || []);
-  const [album,   setAlbum]   = useState(track.album || "");
-  const [year,    setYear]    = useState(track.release_year || "");
+  const [title,    setTitle]    = useState(track.title || "");
+  const [artists,  setArtists]  = useState(track.artists || []);
+  const [album,    setAlbum]    = useState(track.album || "");
+  const [year,     setYear]     = useState(track.release_year || "");
+  const [coverB64, setCoverB64] = useState(track.cover_art_b64 || null);
+
+  function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setCoverB64(reader.result.split(",")[1]);
+    reader.readAsDataURL(file);
+  }
 
   function handleSave() {
-    onSave({ ...track, title, artists, album_artists: artists, album, release_year: year });
+    onSave({ ...track, title, artists, album_artists: artists, album, release_year: year, cover_art_b64: coverB64 || null });
   }
 
   return (
@@ -64,6 +73,28 @@ export default function YtTrackModal({ track, onSave, onClose }) {
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text-h)" }}>
           {t("edit")}
         </h2>
+
+        {/* Cover art */}
+        <label style={{ cursor: "pointer", alignSelf: "flex-start" }}>
+          <div style={{
+            width: 80, height: 80,
+            borderRadius: "var(--radius)",
+            border: "1px solid var(--border)",
+            background: "var(--code-bg)",
+            overflow: "hidden",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {coverB64
+              ? <img src={`data:image/jpeg;base64,${coverB64}`}
+                     style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : track.thumbnail
+                ? <img src={track.thumbnail}
+                       style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.5 }}>cover</span>
+            }
+          </div>
+          <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleCoverFile} />
+        </label>
 
         {/* Title */}
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
