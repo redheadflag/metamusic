@@ -331,5 +331,59 @@ def run() -> None:
                 api_failed(jid, str(exc))
 
 
+def run_once() -> None:
+    """Claim all pending jobs, download them, then exit."""
+    import sys
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    missing = [k for k, v in [("API_BASE", API_BASE), ("SFTP_HOST", SFTP_HOST)] if not v]
+    if missing:
+        raise SystemExit(f"Missing required config: {', '.join(missing)} — check .env")
+
+    logger.info("YT puller (one-shot) started (worker=%s  api=%s)", WORKER_ID, API_BASE)
+
+    total_claimed = 0
+    failed = 0
+
+    while True:
+        try:
+            jobs = api_claim()
+        except Exception as exc:
+            raise SystemExit(f"Claim failed: {exc}")
+
+        if not jobs:
+            break
+
+        total_claimed += len(jobs)
+        for job in jobs:
+            jid: int = job["id"]
+            logger.info("[%d] Processing: %s", jid, job.get("title", "?"))
+            try:
+                remote = process_job(job)
+                api_done(jid, remote)
+                logger.info("[%d] Done → %s", jid, remote)
+            except Exception as exc:
+                logger.error("[%d] Failed: %s", jid, exc)
+                api_failed(jid, str(exc))
+                failed += 1
+
+    logger.info("Done. %d track(s) processed, %d failed.", total_claimed, failed)
+    if failed:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    run()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="YouTube track downloader for metamusic")
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run as a polling daemon (checks for new jobs every POLL_INTERVAL seconds)",
+    )
+    args = parser.parse_args()
+
+    if args.daemon:
+        run()
+    else:
+        run_once()
