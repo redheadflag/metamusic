@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ArtistsEditor from "./ArtistsEditor.jsx";
 import { useLang } from "./LangContext.jsx";
+// BulkEditor — multi-album editor (zip uploads and SC artist profiles)
 
 const formatDuration = (seconds) => {
   if (seconds == null) return null;
@@ -136,6 +137,22 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
                   placeholder={t("artistsPlaceholder")}
                 />
               </div>
+              <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{
+                  fontSize: 11, fontWeight: 600, color: "var(--text)",
+                  textTransform: "uppercase", letterSpacing: "0.07em", opacity: 0.65,
+                }}>
+                  {t("albumArtistsLabel")}
+                </label>
+                <ArtistsEditor
+                  value={albumMeta.album_artists || albumMeta.artists || []}
+                  onChange={set("album_artists")}
+                  placeholder={t("artistsPlaceholder")}
+                />
+                <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
+                  {t("albumArtistHint")}
+                </span>
+              </div>
               <Field label={t("albumLabel")}  value={albumMeta.album}        onChange={set("album")}        required />
               <Field label={t("yearLabel")}   value={albumMeta.release_year} onChange={set("release_year")} />
             </div>
@@ -245,6 +262,7 @@ export default function BulkEditor({ albums: initial, onConfirm, onReset, onRemo
   function confirm() {
     onConfirm(albums.map((a) => ({
       artists:       a.artists || [],
+      album_artists: a.album_artists || a.artists || [],
       album:         a.album,
       release_year:  a.release_year,
       cover_art_b64: a.cover_art_b64,

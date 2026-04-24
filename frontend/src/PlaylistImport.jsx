@@ -1,18 +1,26 @@
 import { useState } from "react";
 import ArtistsEditor from "./ArtistsEditor.jsx";
+import YtTrackModal from "./YtTrackModal.jsx";
 import { useLang } from "./LangContext.jsx";
 
 const API = "/api";
 
-// ── Track row ─────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
+function isSingleVideoUrl(url) {
+  // matches watch?v=... but not when a playlist= param is also present
+  return /[?&]v=/.test(url) && !/[?&]list=/.test(url);
+}
+
+// ── Track row (playlist mode) ─────────────────────────────────────────────────
+
+function TrackRow({ track, onOpenModal, onChange, t }) {
   const matched = track.in_navidrome;
 
   return (
     <div style={{
       display: "flex",
-      alignItems: "flex-start",
+      alignItems: "center",
       gap: 10,
       padding: "10px 12px",
       borderRadius: "var(--radius)",
@@ -29,7 +37,6 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
       {/* Status indicator */}
       <span style={{
         flexShrink: 0,
-        marginTop: 3,
         fontSize: 13,
         fontWeight: 600,
         color: matched ? "var(--accent)" : "var(--danger)",
@@ -39,56 +46,35 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
         {matched ? "✓" : "✕"}
       </span>
 
-      {/* Track info / inline edit */}
-      {isEditing && !matched ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-          <input
-            autoFocus
-            value={track.title}
-            onChange={e => onChange({ title: e.target.value })}
-            placeholder={t("trackLabel")}
-            style={inputStyle}
-          />
-          <ArtistsEditor
-            value={track.artists || []}
-            onChange={(a) => onChange({ artists: a })}
-            placeholder={t("artistsPlaceholder")}
-          />
-          <button onClick={onStopEdit} style={{ alignSelf: "flex-start", fontSize: 12 }}>
-            {t("close")}
-          </button>
+      {/* Track info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--text-h)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}>
+          {track.title}
         </div>
-      ) : (
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--text-h)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}>
-            {track.title}
-          </div>
-          <div style={{
-            fontSize: 12,
-            color: "var(--text)",
-            opacity: 0.55,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}>
-            {(track.artists && track.artists.length)
-              ? track.artists.join(", ")
-              : "—"}
-          </div>
+        <div style={{
+          fontSize: 12,
+          color: "var(--text)",
+          opacity: 0.55,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}>
+          {(track.artists && track.artists.length) ? track.artists.join(", ") : "—"}
+          {track.album ? ` · ${track.album}` : ""}
         </div>
-      )}
+      </div>
 
-      {/* Action buttons (only for unmatched tracks) */}
-      {!matched && !isEditing && (
+      {/* Actions for unmatched tracks */}
+      {!matched && (
         <button
-          onClick={onEdit}
+          onClick={onOpenModal}
           disabled={track.skip}
           style={{
             flexShrink: 0,
@@ -103,12 +89,7 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
       {!matched && (
         <button
           onClick={() => onChange({ skip: !track.skip })}
-          style={{
-            flexShrink: 0,
-            fontSize: 11,
-            padding: "3px 8px",
-            opacity: 0.45,
-          }}
+          style={{ flexShrink: 0, fontSize: 11, padding: "3px 8px", opacity: 0.45 }}
         >
           {track.skip ? t("ytUnskip") : t("ytSkip")}
         </button>
@@ -118,29 +99,185 @@ function TrackRow({ track, isEditing, onEdit, onStopEdit, onChange, t }) {
 }
 
 const inputStyle = {
-  padding: "5px 8px",
+  flex: 1,
+  padding: "10px 12px",
   border: "1px solid var(--border)",
-  borderRadius: 4,
+  borderRadius: "var(--radius)",
   background: "var(--code-bg)",
   color: "var(--text)",
   fontSize: 13,
-  width: "100%",
-  boxSizing: "border-box",
 };
+
+// ── Latency warning banner ────────────────────────────────────────────────────
+
+function LatencyWarning({ t }) {
+  return (
+    <div style={{
+      display: "flex",
+      gap: 10,
+      padding: "10px 14px",
+      borderRadius: "var(--radius)",
+      border: "1px solid var(--accent-border)",
+      background: "var(--accent-bg)",
+      fontSize: 12,
+      color: "var(--text)",
+      lineHeight: 1.5,
+    }}>
+      <span style={{ flexShrink: 0, color: "var(--accent)", fontWeight: 600 }}>⏳</span>
+      <span>{t("ytLatencyWarning")}</span>
+    </div>
+  );
+}
+
+// ── Single video editor ───────────────────────────────────────────────────────
+
+function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
+  const [title,        setTitle]        = useState(videoMeta.title || "");
+  const [artists,      setArtists]      = useState(videoMeta.artists || []);
+  const [albumArtists, setAlbumArtists] = useState(videoMeta.artists || []);
+  const [album,        setAlbum]        = useState("");
+  const [year,         setYear]         = useState("");
+
+  const labelStyle = {
+    fontSize: 11, fontWeight: 600, color: "var(--text)",
+    textTransform: "uppercase", letterSpacing: "0.07em",
+  };
+
+  function handleSubmit() {
+    onSubmit({
+      video_id:     videoMeta.video_id,
+      title,
+      artists,
+      album_artists: albumArtists.length ? albumArtists : artists,
+      album,
+      release_year:  year,
+      thumbnail:    videoMeta.thumbnail || null,
+      duration:     videoMeta.duration || null,
+      in_navidrome: false,
+      skip:         false,
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{
+        fontSize: 11, color: "var(--accent)", fontWeight: 600,
+        textTransform: "uppercase", letterSpacing: "0.07em",
+      }}>
+        {t("ytSingleTrack")}
+      </div>
+
+      {/* Title */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <label style={labelStyle}>
+          {t("trackLabel")}
+          <span style={{ color: "var(--danger)", marginLeft: 2 }}>*</span>
+        </label>
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={{
+            padding: "8px 12px",
+            border: `1px solid ${!title.trim() ? "var(--danger)" : "var(--border)"}`,
+            borderRadius: "var(--radius)",
+            background: "var(--code-bg)",
+            color: "var(--text)",
+            fontSize: 13,
+          }}
+        />
+      </div>
+
+      {/* Artists */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <label style={labelStyle}>
+          {t("artistsLabel")}
+          <span style={{ color: "var(--danger)", marginLeft: 2 }}>*</span>
+        </label>
+        <ArtistsEditor
+          value={artists}
+          onChange={setArtists}
+          placeholder={t("artistsPlaceholder")}
+        />
+      </div>
+
+      {/* Album Artists */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <label style={{ ...labelStyle, opacity: 0.65 }}>{t("albumArtistsLabel")}</label>
+        <ArtistsEditor
+          value={albumArtists}
+          onChange={setAlbumArtists}
+          placeholder={t("artistsPlaceholder")}
+        />
+        <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
+          {t("albumArtistHint")}
+        </span>
+      </div>
+
+      {/* Album + Year */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <label style={labelStyle}>{t("albumLabel")}</label>
+          <input
+            value={album}
+            onChange={(e) => setAlbum(e.target.value)}
+            placeholder="optional"
+            style={{
+              padding: "8px 12px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              background: "var(--code-bg)",
+              color: "var(--text)",
+              fontSize: 13,
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <label style={labelStyle}>{t("yearLabel")}</label>
+          <input
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            style={{
+              padding: "8px 12px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              background: "var(--code-bg)",
+              color: "var(--text)",
+              fontSize: 13,
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+        <button onClick={onBack} style={{ opacity: 0.6 }}>{t("back")}</button>
+        <button
+          className="primary"
+          disabled={!title.trim() || !artists.length}
+          onClick={handleSubmit}
+          style={{ flex: 1 }}
+        >
+          {t("ytAddToQueue")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PlaylistImport({ onBack, onImport }) {
   const { t } = useLang();
 
-  const [url,       setUrl]       = useState("");
-  const [scanning,  setScanning]  = useState(false);
-  const [playlist,  setPlaylist]  = useState(null);   // YtPlaylistScan
-  const [tracks,    setTracks]    = useState([]);
-  const [error,     setError]     = useState(null);
-  const [editingIdx, setEditingIdx] = useState(null);
+  const [url,         setUrl]         = useState("");
+  const [scanning,    setScanning]    = useState(false);
+  const [playlist,    setPlaylist]    = useState(null);   // YtPlaylistScan
+  const [tracks,      setTracks]      = useState([]);
+  const [singleMeta,  setSingleMeta]  = useState(null);   // single video metadata
+  const [error,       setError]       = useState(null);
+  const [modalIdx,    setModalIdx]    = useState(null);   // index of track being edited
 
-  // ── scan ──────────────────────────────────────────────────────────────────
+  // ── scan / fetch ──────────────────────────────────────────────────────────
 
   async function handleScan() {
     const trimmed = url.trim();
@@ -149,18 +286,32 @@ export default function PlaylistImport({ onBack, onImport }) {
     setError(null);
     setPlaylist(null);
     setTracks([]);
-    setEditingIdx(null);
+    setSingleMeta(null);
+    setModalIdx(null);
 
     try {
-      const res = await fetch(`${API}/yt-scan`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ url: trimmed }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setPlaylist(data);
-      setTracks(data.tracks.map(t => ({ ...t, skip: false })));
+      if (isSingleVideoUrl(trimmed)) {
+        // Single video — fetch metadata and show inline editor
+        const res = await fetch(`${API}/yt-fetch-video`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ url: trimmed }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setSingleMeta(data);
+      } else {
+        // Playlist — existing scan flow
+        const res = await fetch(`${API}/yt-scan`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ url: trimmed }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setPlaylist(data);
+        setTracks(data.tracks.map(t => ({ ...t, skip: false })));
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -176,13 +327,17 @@ export default function PlaylistImport({ onBack, onImport }) {
 
   // ── import ────────────────────────────────────────────────────────────────
 
-  function handleImport() {
+  function handlePlaylistImport() {
     onImport({
       playlist_name: playlist.playlist_name,
       tracks: tracks.map(t => ({
         video_id:     t.video_id,
         title:        t.title,
         artists:      t.artists || [],
+        album_artists: t.album_artists || t.artists || [],
+        album:        t.album || "",
+        release_year: t.release_year || "",
+        thumbnail:    t.thumbnail || null,
         duration:     t.duration,
         in_navidrome: t.in_navidrome,
         navidrome_id: t.navidrome_id || null,
@@ -191,13 +346,23 @@ export default function PlaylistImport({ onBack, onImport }) {
     });
   }
 
+  function handleSingleImport(trackMeta) {
+    onImport({
+      playlist_name: "",
+      tracks: [{ ...trackMeta, in_navidrome: false, skip: false }],
+    });
+  }
+
   // ── derived ───────────────────────────────────────────────────────────────
 
-  const matched   = tracks.filter(t => t.in_navidrome).length;
+  const matched    = tracks.filter(t => t.in_navidrome).length;
   const toDownload = tracks.filter(t => !t.in_navidrome && !t.skip).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* Latency warning */}
+      <LatencyWarning t={t} />
 
       {/* URL input */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -217,15 +382,7 @@ export default function PlaylistImport({ onBack, onImport }) {
             onChange={e => setUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && !scanning && handleScan()}
             placeholder={t("ytUrlPlaceholder")}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              background: "var(--code-bg)",
-              color: "var(--text)",
-              fontSize: 13,
-            }}
+            style={inputStyle}
           />
           <button
             onClick={handleScan}
@@ -240,7 +397,17 @@ export default function PlaylistImport({ onBack, onImport }) {
         )}
       </div>
 
-      {/* Results */}
+      {/* Single video editor */}
+      {singleMeta && (
+        <SingleVideoEditor
+          videoMeta={singleMeta}
+          onSubmit={handleSingleImport}
+          onBack={() => setSingleMeta(null)}
+          t={t}
+        />
+      )}
+
+      {/* Playlist results */}
       {playlist && tracks.length > 0 && (
         <>
           {/* Playlist header */}
@@ -265,9 +432,7 @@ export default function PlaylistImport({ onBack, onImport }) {
               <TrackRow
                 key={track.video_id}
                 track={track}
-                isEditing={editingIdx === idx}
-                onEdit={() => setEditingIdx(idx)}
-                onStopEdit={() => setEditingIdx(null)}
+                onOpenModal={() => setModalIdx(idx)}
                 onChange={changes => updateTrack(idx, changes)}
                 t={t}
               />
@@ -278,7 +443,7 @@ export default function PlaylistImport({ onBack, onImport }) {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {toDownload > 0 ? (
               <button
-                onClick={handleImport}
+                onClick={handlePlaylistImport}
                 style={{
                   background: "var(--accent)",
                   color: "#fff",
@@ -298,14 +463,25 @@ export default function PlaylistImport({ onBack, onImport }) {
       )}
 
       {/* Back */}
-      <div>
-        <button
-          onClick={onBack}
-          style={{ fontSize: 12, opacity: 0.6 }}
-        >
-          {t("back")}
-        </button>
-      </div>
+      {!singleMeta && (
+        <div>
+          <button onClick={onBack} style={{ fontSize: 12, opacity: 0.6 }}>
+            {t("back")}
+          </button>
+        </div>
+      )}
+
+      {/* Track metadata modal */}
+      {modalIdx !== null && tracks[modalIdx] && (
+        <YtTrackModal
+          track={tracks[modalIdx]}
+          onSave={(updated) => {
+            updateTrack(modalIdx, updated);
+            setModalIdx(null);
+          }}
+          onClose={() => setModalIdx(null)}
+        />
+      )}
     </div>
   );
 }

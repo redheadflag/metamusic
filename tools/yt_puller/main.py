@@ -194,9 +194,17 @@ def download_youtube_track(video_id: str, dest_dir: str) -> str:
     raise RuntimeError(f"yt-dlp produced no MP3 for {video_id}")
 
 
-def retag_mp3(path: str, title: str, artists: list[str], album: str = "") -> None:
+def retag_mp3(
+    path: str,
+    title: str,
+    artists: list[str],
+    album_artists: list[str] | None = None,
+    album: str = "",
+    release_year: str = "",
+) -> None:
     """Overwrite ID3 text tags, keeping the embedded cover art intact."""
     parts = [str(a).strip() for a in (artists or []) if str(a).strip()]
+    aa_parts = [str(a).strip() for a in (album_artists or parts) if str(a).strip()]
     try:
         try:
             tags = ID3(path)
@@ -204,9 +212,9 @@ def retag_mp3(path: str, title: str, artists: list[str], album: str = "") -> Non
             tags = ID3()
         tags["TIT2"] = TIT2(encoding=3, text=title)
         tags["TPE1"] = TPE1(encoding=3, text=parts)
-        tags["TPE2"] = TPE2(encoding=3, text=parts)
+        tags["TPE2"] = TPE2(encoding=3, text=aa_parts)
         tags["TALB"] = TALB(encoding=3, text=album)
-        tags["TDRC"] = TDRC(encoding=3, text="")
+        tags["TDRC"] = TDRC(encoding=3, text=release_year or "")
         tags["TRCK"] = TRCK(encoding=3, text="1")
         tags.save(path, v2_version=4)
     except Exception as exc:
@@ -259,15 +267,28 @@ def process_job(job: dict) -> str:
     video_id: str = job["video_id"]
     title: str = job["title"]
     artists: list[str] = job.get("artists") or []
-    folder = _safe(artists[0]) if artists else "Unknown"
+    album_artists: list[str] = job.get("album_artists") or artists
+    album: str = job.get("album") or ""
+    release_year: str = job.get("release_year") or ""
+    folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))
 
     tmp_dir = tempfile.mkdtemp(prefix="yt_puller_")
     try:
         mp3_path = download_youtube_track(video_id, tmp_dir)
-        retag_mp3(mp3_path, title=title, artists=artists, album="")
+        retag_mp3(
+            mp3_path,
+            title=title,
+            artists=artists,
+            album_artists=album_artists,
+            album=album,
+            release_year=release_year,
+        )
 
         fname = _safe(title) + ".mp3"
-        remote = str(PurePosixPath(SFTP_BASE) / folder / fname)
+        if album:
+            remote = str(PurePosixPath(SFTP_BASE) / folder / _safe(album) / fname)
+        else:
+            remote = str(PurePosixPath(SFTP_BASE) / folder / fname)
         _sftp_client.upload(mp3_path, remote)
         return remote
     finally:

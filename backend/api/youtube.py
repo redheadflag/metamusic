@@ -38,6 +38,35 @@ async def _check_puller_token(x_puller_token: str = Header(default=None)):
         raise HTTPException(403, "Invalid or missing X-Puller-Token")
 
 
+@router.post("/yt-fetch-video")
+async def yt_fetch_video(body: dict):
+    """Fetch metadata for a single YouTube video (no download)."""
+    from youtube.playlist import fetch_video
+    from fix_artists import split_artist
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url is required")
+
+    logger.info("YT single video fetch: %s", url)
+    try:
+        data = await _run_blocking(fetch_video, url)
+    except Exception as exc:
+        logger.error("YT video fetch error: %s", exc)
+        raise HTTPException(400, str(exc))
+
+    raw_artist = data.get("artist", "")
+    artists = split_artist(raw_artist) or ([raw_artist.strip()] if raw_artist.strip() else [])
+
+    return {
+        "video_id": data["video_id"],
+        "title": data["title"],
+        "artists": artists,
+        "duration": data.get("duration"),
+        "thumbnail": data.get("thumbnail"),
+    }
+
+
 @router.post("/yt-scan", response_model=YtPlaylistScan)
 async def yt_scan(body: dict):
     """Fetch a YouTube playlist and check each track against the Navidrome library."""
@@ -119,6 +148,10 @@ async def yt_import(req: YtImportRequest):
             track.video_id,
             track.title,
             list(track.artists),
+            list(track.album_artists),
+            track.album,
+            track.release_year,
+            track.thumbnail,
             track.duration,
             playlist_id,
             req.playlist_name,

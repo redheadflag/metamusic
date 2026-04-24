@@ -86,6 +86,9 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
 
   const [shared, setShared] = useState({
     artists:       Array.isArray(first.artists) ? first.artists : [],
+    album_artists: (Array.isArray(first.album_artists) && first.album_artists.length)
+                     ? first.album_artists
+                     : Array.isArray(first.artists) ? first.artists : [],
     album:         first.album,
     release_year:  first.release_year,
     cover_art_b64: first.cover_art_b64 ?? null,
@@ -191,6 +194,23 @@ export default function MetaEditor({ tracks, onConfirm, onReset }) {
               onChange={set("artists")}
               placeholder={t("artistsPlaceholder")}
             />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{
+              fontSize: 11, fontWeight: 600, color: "var(--text)",
+              textTransform: "uppercase", letterSpacing: "0.07em", opacity: 0.65,
+            }}>
+              {t("albumArtistsLabel")}
+            </label>
+            <ArtistsEditor
+              value={shared.album_artists}
+              onChange={set("album_artists")}
+              placeholder={t("artistsPlaceholder")}
+            />
+            <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
+              {t("albumArtistHint")}
+            </span>
           </div>
 
           {isSingle ? (

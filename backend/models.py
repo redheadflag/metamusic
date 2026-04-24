@@ -199,6 +199,10 @@ class YtTrackImport(BaseModel):
     video_id: str
     title: str
     artists: list[str] = []
+    album_artists: list[str] = []
+    album: str = ""
+    release_year: str = ""
+    thumbnail: str | None = None
     duration: int | None = None
     in_navidrome: bool = False
     navidrome_id: str | None = None
@@ -210,7 +214,14 @@ class YtTrackImport(BaseModel):
         if not isinstance(data, dict):
             return data
         _coerce_list_field(data, "artists", "artist")
+        _coerce_list_field(data, "album_artists", "album_artist")
         return data
+
+    @model_validator(mode="after")
+    def _default_album_artists(self):
+        if not self.album_artists and self.artists:
+            self.album_artists = list(self.artists)
+        return self
 
 
 class YtImportRequest(BaseModel):

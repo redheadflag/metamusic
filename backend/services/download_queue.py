@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS yt_downloads (
     video_id      TEXT NOT NULL UNIQUE,
     title         TEXT NOT NULL,
     artists       TEXT NOT NULL,
+    album_artists TEXT NOT NULL DEFAULT '[]',
+    album         TEXT NOT NULL DEFAULT '',
+    release_year  TEXT NOT NULL DEFAULT '',
+    thumbnail     TEXT,
     duration      INTEGER,
     playlist_id   TEXT,
     playlist_name TEXT,
@@ -33,6 +37,13 @@ CREATE TABLE IF NOT EXISTS yt_downloads (
 );
 """
 
+_MIGRATE = [
+    "ALTER TABLE yt_downloads ADD COLUMN album_artists TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE yt_downloads ADD COLUMN album TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE yt_downloads ADD COLUMN release_year TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE yt_downloads ADD COLUMN thumbnail TEXT",
+]
+
 
 @contextmanager
 def _conn():
@@ -43,6 +54,11 @@ def _conn():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(_CREATE)
+    for stmt in _MIGRATE:
+        try:
+            con.execute(stmt)
+        except Exception:
+            pass  # column already exists
     try:
         yield con
         con.commit()
@@ -53,6 +69,10 @@ def _conn():
 def _to_dict(row) -> dict:
     d = dict(row)
     d["artists"] = json.loads(d["artists"])
+    try:
+        d["album_artists"] = json.loads(d.get("album_artists") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        d["album_artists"] = []
     return d
 
 
@@ -60,6 +80,10 @@ def enqueue(
     video_id: str,
     title: str,
     artists: list,
+    album_artists: list,
+    album: str,
+    release_year: str,
+    thumbnail: str | None,
     duration,
     playlist_id,
     playlist_name,
@@ -70,11 +94,16 @@ def enqueue(
         cur = con.execute(
             """
             INSERT INTO yt_downloads
-                (video_id, title, artists, duration, playlist_id, playlist_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (video_id, title, artists, album_artists, album, release_year, thumbnail,
+                 duration, playlist_id, playlist_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 title=excluded.title,
                 artists=excluded.artists,
+                album_artists=excluded.album_artists,
+                album=excluded.album,
+                release_year=excluded.release_year,
+                thumbnail=excluded.thumbnail,
                 status='pending',
                 error=NULL,
                 claimed_by=NULL,
@@ -86,6 +115,10 @@ def enqueue(
                 video_id,
                 title,
                 json.dumps(artists, ensure_ascii=False),
+                json.dumps(album_artists, ensure_ascii=False),
+                album or "",
+                release_year or "",
+                thumbnail,
                 duration,
                 playlist_id,
                 playlist_name,

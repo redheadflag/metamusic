@@ -58,23 +58,30 @@ export const translations = {
     requestBody:      "List the artists, albums, or tracks you'd like added to the server. Please include only content you actually listen to — server space is not unlimited.",
     close:            "Close",
 
-    // YouTube playlist import (ModeSelector)
-    ytImport:         "Import YouTube playlist",
-    ytImportHint:     "Scan a YouTube Music playlist and download missing tracks",
+    // YouTube (ModeSelector)
+    ytImport:         "Load from YouTube",
+    ytImportHint:     "Download a track or playlist — added to library in the background",
 
     // PlaylistImport component
-    ytPlaylistUrl:    "YouTube playlist URL",
-    ytUrlPlaceholder: "https://music.youtube.com/playlist?list=… or https://www.youtube.com/playlist?list=…",
-    ytScan:           "Scan",
-    ytScanning:       "Scanning…",
+    ytPlaylistUrl:    "YouTube URL",
+    ytUrlPlaceholder: "youtube.com/watch?v=… or music.youtube.com/playlist?list=…",
+    ytScan:           "Load",
+    ytScanning:       "Loading…",
     ytTracksFound:    (total, matched) => `${total} track${total !== 1 ? "s" : ""} · ${matched} in library`,
-    ytImportBtn:      (n) => `Download & import ${n} track${n !== 1 ? "s" : ""}`,
+    ytImportBtn:      (n) => `Queue ${n} track${n !== 1 ? "s" : ""} for download`,
     ytAllMatched:     "All tracks are already in the library",
     ytSkip:           "Skip",
     ytUnskip:         "Undo skip",
     edit:             "Edit",
     ytQueued:         (queued, matched) => `${queued} track${queued !== 1 ? "s" : ""} queued for download, ${matched} already in library`,
     ytViewQueue:      "View download queue",
+    ytLatencyWarning: "Tracks are downloaded in the background and will appear in your library after a short delay.",
+    ytSingleTrack:    "Single video detected",
+    ytAddToQueue:     "Add to download queue",
+
+    // Metadata fields (shared)
+    albumArtistsLabel:   "Album artists",
+    albumArtistHint:     "Used for folder organization — usually same as artists",
 
     // App states
     uploadingLabel:   "Uploading…",
@@ -149,23 +156,30 @@ export const translations = {
     requestBody:      "Укажите список исполнителей, альбомов или треков, которые вы хотели бы видеть на сервере. Просьба включать только то, что вы действительно слушаете — место на сервере ограничено.",
     close:            "Закрыть",
 
-    // YouTube playlist import (ModeSelector)
-    ytImport:         "Импорт плейлиста YouTube",
-    ytImportHint:     "Сканирует плейлист YouTube Music и скачивает отсутствующие треки",
+    // YouTube (ModeSelector)
+    ytImport:         "Загрузить с YouTube",
+    ytImportHint:     "Скачать трек или плейлист — добавляется в библиотеку в фоне",
 
     // PlaylistImport component
-    ytPlaylistUrl:    "Ссылка на плейлист YouTube",
-    ytUrlPlaceholder: "https://music.youtube.com/playlist?list=… или https://www.youtube.com/playlist?list=…",
-    ytScan:           "Сканировать",
-    ytScanning:       "Сканирую…",
+    ytPlaylistUrl:    "Ссылка YouTube",
+    ytUrlPlaceholder: "youtube.com/watch?v=… или music.youtube.com/playlist?list=…",
+    ytScan:           "Загрузить",
+    ytScanning:       "Загружаю…",
     ytTracksFound:    (total, matched) => `${total} ${total === 1 ? "трек" : total < 5 ? "трека" : "треков"} · ${matched} в библиотеке`,
-    ytImportBtn:      (n) => `Скачать и импортировать ${n} ${n === 1 ? "трек" : n < 5 ? "трека" : "треков"}`,
+    ytImportBtn:      (n) => `Поставить в очередь ${n} ${n === 1 ? "трек" : n < 5 ? "трека" : "треков"}`,
     ytAllMatched:     "Все треки уже есть в библиотеке",
     ytSkip:           "Пропустить",
     ytUnskip:         "Отмена",
     edit:             "Изменить",
     ytQueued:         (queued, matched) => `${queued} ${queued === 1 ? "трек поставлен" : queued < 5 ? "трека поставлено" : "треков поставлено"} в очередь, ${matched} уже в библиотеке`,
     ytViewQueue:      "Смотреть очередь загрузки",
+    ytLatencyWarning: "Треки скачиваются в фоне и появятся в библиотеке после небольшой задержки.",
+    ytSingleTrack:    "Обнаружено отдельное видео",
+    ytAddToQueue:     "Добавить в очередь загрузки",
+
+    // Metadata fields (shared)
+    albumArtistsLabel:   "Исполнители альбома",
+    albumArtistHint:     "Используется для папок — обычно совпадает с исполнителями",
 
     // App states
     uploadingLabel:   "Загрузка…",
