@@ -12,6 +12,11 @@ function isSingleVideoUrl(url) {
   return /[?&]v=/.test(url) && !/[?&]list=/.test(url);
 }
 
+function extractVideoId(url) {
+  const m = url.match(/[?&]v=([^&]+)/);
+  return m ? m[1] : null;
+}
+
 // ── Track row (playlist mode) ─────────────────────────────────────────────────
 
 function TrackRow({ track, onOpenModal, onChange, t }) {
@@ -291,15 +296,22 @@ export default function PlaylistImport({ onBack, onImport }) {
 
     try {
       if (isSingleVideoUrl(trimmed)) {
-        // Single video — fetch metadata and show inline editor
-        const res = await fetch(`${API}/yt-fetch-video`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ url: trimmed }),
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        setSingleMeta(data);
+        // Try to pre-fill metadata from the backend; fall back to empty editor
+        // if the server lacks YT cookies (bot detection) — user fills in manually.
+        const videoId = extractVideoId(trimmed);
+        try {
+          const res = await fetch(`${API}/yt-fetch-video`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ url: trimmed }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+          setSingleMeta(data);
+        } catch {
+          // Couldn't fetch metadata — open editor with empty fields
+          setSingleMeta({ video_id: videoId || trimmed, title: "", artists: [], duration: null, thumbnail: null });
+        }
       } else {
         // Playlist — existing scan flow
         const res = await fetch(`${API}/yt-scan`, {
