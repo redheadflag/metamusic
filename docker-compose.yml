@@ -15,7 +15,6 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       UPLOAD_DIR: /app/uploads
       DOWNLOAD_QUEUE_DB: /app/data/queue.db
-      YT_PULLER_TOKEN: ${YT_PULLER_TOKEN}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
