@@ -136,12 +136,20 @@ function LatencyWarning({ t }) {
 
 // ── Single video editor ───────────────────────────────────────────────────────
 
+const fieldInputStyle = {
+  padding: "8px 12px",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius)",
+  background: "var(--code-bg)",
+  color: "var(--text)",
+  fontSize: 13,
+};
+
 function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
-  const [title,        setTitle]        = useState(videoMeta.title || "");
-  const [artists,      setArtists]      = useState(videoMeta.artists || []);
-  const [albumArtists, setAlbumArtists] = useState(videoMeta.artists || []);
-  const [album,        setAlbum]        = useState("");
-  const [year,         setYear]         = useState("");
+  const [title,   setTitle]   = useState(videoMeta.title || "");
+  const [artists, setArtists] = useState(videoMeta.artists || []);
+  const [album,   setAlbum]   = useState("");
+  const [year,    setYear]    = useState("");
 
   const labelStyle = {
     fontSize: 11, fontWeight: 600, color: "var(--text)",
@@ -153,7 +161,7 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
       video_id:     videoMeta.video_id,
       title,
       artists,
-      album_artists: albumArtists.length ? albumArtists : artists,
+      album_artists: artists,
       album,
       release_year:  year,
       thumbnail:    videoMeta.thumbnail || null,
@@ -182,18 +190,11 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            border: `1px solid ${!title.trim() ? "var(--danger)" : "var(--border)"}`,
-            borderRadius: "var(--radius)",
-            background: "var(--code-bg)",
-            color: "var(--text)",
-            fontSize: 13,
-          }}
+          style={{ ...fieldInputStyle, borderColor: !title.trim() ? "var(--danger)" : undefined }}
         />
       </div>
 
-      {/* Artists */}
+      {/* Artists (also sets album_artists) */}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <label style={labelStyle}>
           {t("artistsLabel")}
@@ -206,19 +207,6 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
         />
       </div>
 
-      {/* Album Artists */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <label style={{ ...labelStyle, opacity: 0.65 }}>{t("albumArtistsLabel")}</label>
-        <ArtistsEditor
-          value={albumArtists}
-          onChange={setAlbumArtists}
-          placeholder={t("artistsPlaceholder")}
-        />
-        <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
-          {t("albumArtistHint")}
-        </span>
-      </div>
-
       {/* Album + Year */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -227,14 +215,7 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
             value={album}
             onChange={(e) => setAlbum(e.target.value)}
             placeholder="optional"
-            style={{
-              padding: "8px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              background: "var(--code-bg)",
-              color: "var(--text)",
-              fontSize: 13,
-            }}
+            style={fieldInputStyle}
           />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -242,14 +223,7 @@ function SingleVideoEditor({ videoMeta, onSubmit, onBack, t }) {
           <input
             value={year}
             onChange={(e) => setYear(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              background: "var(--code-bg)",
-              color: "var(--text)",
-              fontSize: 13,
-            }}
+            style={fieldInputStyle}
           />
         </div>
       </div>

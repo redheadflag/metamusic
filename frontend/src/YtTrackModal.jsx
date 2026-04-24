@@ -24,25 +24,13 @@ const labelStyle = {
 export default function YtTrackModal({ track, onSave, onClose }) {
   const { t } = useLang();
 
-  const [title,        setTitle]        = useState(track.title || "");
-  const [artists,      setArtists]      = useState(track.artists || []);
-  const [albumArtists, setAlbumArtists] = useState(
-    (track.album_artists && track.album_artists.length)
-      ? track.album_artists
-      : (track.artists || [])
-  );
-  const [album,        setAlbum]        = useState(track.album || "");
-  const [year,         setYear]         = useState(track.release_year || "");
+  const [title,   setTitle]   = useState(track.title || "");
+  const [artists, setArtists] = useState(track.artists || []);
+  const [album,   setAlbum]   = useState(track.album || "");
+  const [year,    setYear]    = useState(track.release_year || "");
 
   function handleSave() {
-    onSave({
-      ...track,
-      title,
-      artists,
-      album_artists: albumArtists.length ? albumArtists : artists,
-      album,
-      release_year: year,
-    });
+    onSave({ ...track, title, artists, album_artists: artists, album, release_year: year });
   }
 
   return (
@@ -88,7 +76,7 @@ export default function YtTrackModal({ track, onSave, onClose }) {
           />
         </div>
 
-        {/* Artists */}
+        {/* Artists (also sets album_artists) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <label style={labelStyle}>
             {t("artistsLabel")}
@@ -99,19 +87,6 @@ export default function YtTrackModal({ track, onSave, onClose }) {
             onChange={setArtists}
             placeholder={t("artistsPlaceholder")}
           />
-        </div>
-
-        {/* Album Artists */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ ...labelStyle, opacity: 0.65 }}>{t("albumArtistsLabel")}</label>
-          <ArtistsEditor
-            value={albumArtists}
-            onChange={setAlbumArtists}
-            placeholder={t("artistsPlaceholder")}
-          />
-          <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
-            {t("albumArtistHint")}
-          </span>
         </div>
 
         {/* Album + Year */}

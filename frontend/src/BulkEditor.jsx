@@ -133,25 +133,9 @@ function AlbumPanel({ albumMeta, index, collapsed, onToggle, onChange, onRemove,
                 </label>
                 <ArtistsEditor
                   value={artists}
-                  onChange={set("artists")}
+                  onChange={(v) => onChange(index, { ...albumMeta, artists: v, album_artists: v })}
                   placeholder={t("artistsPlaceholder")}
                 />
-              </div>
-              <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
-                <label style={{
-                  fontSize: 11, fontWeight: 600, color: "var(--text)",
-                  textTransform: "uppercase", letterSpacing: "0.07em", opacity: 0.65,
-                }}>
-                  {t("albumArtistsLabel")}
-                </label>
-                <ArtistsEditor
-                  value={albumMeta.album_artists || albumMeta.artists || []}
-                  onChange={set("album_artists")}
-                  placeholder={t("artistsPlaceholder")}
-                />
-                <span style={{ fontSize: 10, color: "var(--text)", opacity: 0.38 }}>
-                  {t("albumArtistHint")}
-                </span>
               </div>
               <Field label={t("albumLabel")}  value={albumMeta.album}        onChange={set("album")}        required />
               <Field label={t("yearLabel")}   value={albumMeta.release_year} onChange={set("release_year")} />
