@@ -113,31 +113,6 @@ class ProcessRequest(BaseModel):
         return self
 
 
-class ScProcessRequest(BaseModel):
-    tracks: list[TrackMeta]
-    artists: list[str] = []
-    album_artists: list[str] = []
-    album: str = ""
-    release_year: str = ""
-    is_single: bool = False
-    cover_art_b64: str | None = None
-    publisher: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy(cls, data):
-        if not isinstance(data, dict):
-            return data
-        _coerce_list_field(data, "artists", "artist")
-        _coerce_list_field(data, "album_artists", "album_artist")
-        return data
-
-    @model_validator(mode="after")
-    def _default_album_artists(self):
-        if not self.album_artists and self.artists:
-            self.album_artists = list(self.artists)
-        return self
-
 
 class AlbumMeta(BaseModel):
     zip_name: str
@@ -164,50 +139,25 @@ class BulkProcessRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# YouTube playlist import
+# Unified media import (YouTube + SoundCloud)
 # ---------------------------------------------------------------------------
 
 
-class YtTrackScan(BaseModel):
-    """One track returned from /api/yt-scan."""
-    video_id: str
-    title: str
-    artists: list[str] = []
-    duration: int | None = None
-    thumbnail: str | None = None
-    in_navidrome: bool
-    navidrome_id: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy(cls, data):
-        if not isinstance(data, dict):
-            return data
-        _coerce_list_field(data, "artists", "artist")
-        return data
-
-
-class YtPlaylistScan(BaseModel):
-    """Full result of /api/yt-scan."""
-    playlist_id: str
-    playlist_name: str
-    tracks: list[YtTrackScan]
-
-
-class YtTrackImport(BaseModel):
-    """One track submitted to /api/yt-import (user may have edited title/artist)."""
-    video_id: str
+class MediaTrackScan(BaseModel):
+    """One track returned from /api/scan — pre-matched against Navidrome."""
+    source_id: str           # video_id for YT; permalink slug or track ID for SC
+    source_url: str          # full playable URL
     title: str
     artists: list[str] = []
     album_artists: list[str] = []
     album: str = ""
     release_year: str = ""
+    duration: int | None = None
     thumbnail: str | None = None
     cover_art_b64: str | None = None
-    duration: int | None = None
     in_navidrome: bool = False
     navidrome_id: str | None = None
-    skip: bool = False  # user explicitly excluded this track
+    skip: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -225,8 +175,22 @@ class YtTrackImport(BaseModel):
         return self
 
 
-class YtImportRequest(BaseModel):
-    """Request body for /api/yt-import."""
+class MediaScanResult(BaseModel):
+    """Response from /api/scan."""
+    source: str              # 'youtube' | 'soundcloud'
+    type: str                # 'single' | 'playlist'
+    playlist_name: str
+    tracks: list[MediaTrackScan]
+
+
+class MediaImportRequest(BaseModel):
+    """Request body for /api/import."""
+    source: str
+    tracks: list[MediaTrackScan]
     playlist_name: str
     username: str = ""
-    tracks: list[YtTrackImport]
+    download_mode: str = "playlist"   # 'album' | 'playlist'
+    album_cover_b64: str | None = None
+    album_artist: str | None = None
+    album_title: str | None = None
+    release_year: str | None = None
