@@ -6,6 +6,8 @@ import base64
 import os
 import re
 import logging
+import threading
+import time
 from typing import Optional
 
 import httpx
@@ -13,22 +15,71 @@ import httpx
 logger = logging.getLogger(__name__)
 
 SC_API = "https://api-v2.soundcloud.com"
-SC_CLIENT_ID = os.environ.get("SC_CLIENT_ID", "")
+SC_CLIENT_ID = os.environ.get("SC_CLIENT_ID", "")  # optional override
 SC_OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
 HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
 
+_SCRAPE_TTL = 3600  # seconds before re-scraping the client_id
+_scraped_client_id: str = ""
+_scraped_at: float = 0.0
+_scrape_lock = threading.Lock()
+
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://soundcloud.com/",
+    "Origin": "https://soundcloud.com",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+}
+
+
+def _scrape_client_id() -> str:
+    """Extract a fresh client_id from SoundCloud's bundled JS."""
+    with httpx.Client(headers=_BROWSER_HEADERS, follow_redirects=True, timeout=20,
+                      proxy=HTTPS_PROXY) as client:
+        r = client.get("https://soundcloud.com")
+        r.raise_for_status()
+        script_urls = re.findall(
+            r'<script[^>]+src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"',
+            r.text,
+        )
+        for url in reversed(script_urls):
+            try:
+                sr = client.get(url, timeout=15)
+                m = re.search(r'[,{]client_id:"([a-zA-Z0-9]+)"', sr.text)
+                if m:
+                    logger.info("Scraped fresh SC client_id from %s", url)
+                    return m[1]
+            except Exception:
+                continue
+    raise RuntimeError("Could not scrape a SoundCloud client_id from the web app")
+
+
+def _get_client_id() -> str:
+    global _scraped_client_id, _scraped_at
+
+    if SC_CLIENT_ID:
+        return SC_CLIENT_ID
+
+    with _scrape_lock:
+        if _scraped_client_id and (time.monotonic() - _scraped_at) < _SCRAPE_TTL:
+            return _scraped_client_id
+        _scraped_client_id = _scrape_client_id()
+        _scraped_at = time.monotonic()
+        return _scraped_client_id
+
+
+def _invalidate_client_id() -> None:
+    global _scraped_at
+    with _scrape_lock:
+        _scraped_at = 0.0
+
 
 def _client() -> httpx.Client:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://soundcloud.com/",
-        "Origin": "https://soundcloud.com",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-    }
+    headers = dict(_BROWSER_HEADERS)
     if SC_OAUTH_TOKEN:
         headers["Authorization"] = f"OAuth {SC_OAUTH_TOKEN}"
 
@@ -42,14 +93,19 @@ def _client() -> httpx.Client:
 
 def _get(path: str, params: dict | None = None) -> dict | list:
     p = dict(params or {})
-    if SC_CLIENT_ID:
-        p["client_id"] = SC_CLIENT_ID
+    p["client_id"] = _get_client_id()
 
     url = f"{SC_API}{path}"
-    logger.info("SC API: GET %s params=%s", url, p)
+    logger.info("SC API: GET %s", url)
 
     with _client() as client:
         resp = client.get(url, params=p)
+        if resp.status_code == 403 and not SC_CLIENT_ID:
+            # client_id expired; scrape a fresh one and retry once
+            logger.warning("SC client_id returned 403 — scraping a fresh one")
+            _invalidate_client_id()
+            p["client_id"] = _get_client_id()
+            resp = client.get(url, params=p)
         resp.raise_for_status()
         return resp.json()
 
