@@ -10,10 +10,10 @@
 # ///
 
 """
-tools/yt_puller/main.py
-───────────────────────
-Local worker: claims pending YouTube download jobs from the VPS queue,
-downloads each track, uploads via SFTP, and reports done/failed.
+tools/media_puller/main.py
+──────────────────────────
+Local worker: claims pending download jobs (YouTube + SoundCloud) from the
+VPS queue, downloads each track, uploads via SFTP, and reports done/failed.
 
 Config — .env file in the same directory as this script:
     API_BASE              https://myserver.com/api
@@ -24,7 +24,8 @@ Config — .env file in the same directory as this script:
     SFTP_KEY_FILE         path to private key (preferred over password)
     SFTP_PASSWORD         password (fallback)
     SFTP_BASE             absolute path on remote, e.g. /home/user/music
-    YOUTUBE_COOKIES_FILE  (optional) yt-dlp cookies file
+    YOUTUBE_COOKIES_FILE  (optional) yt-dlp cookies file for YouTube
+    SC_COOKIES_FILE       (optional) yt-dlp cookies file for SoundCloud
     CLAIM_LIMIT           jobs per poll cycle (default 3)
     POLL_INTERVAL         seconds between polls when idle (default 30)
 """
@@ -82,6 +83,7 @@ SFTP_BASE = os.environ.get("SFTP_BASE", "").rstrip("/")
 SFTP_KEY_FILE: str | None = os.environ.get("SFTP_KEY_FILE") or None
 SFTP_PASSWORD: str | None = os.environ.get("SFTP_PASSWORD") or None
 YOUTUBE_COOKIES_FILE = os.environ.get("YOUTUBE_COOKIES_FILE", "").strip()
+SC_COOKIES_FILE = os.environ.get("SC_COOKIES_FILE", "").strip()
 WORKER_ID = socket.gethostname()
 CLAIM_LIMIT = int(os.environ.get("CLAIM_LIMIT", "3"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
@@ -96,8 +98,7 @@ def _safe(s: str) -> str:
 # ── artwork ───────────────────────────────────────────────────────────────────
 
 def _crop_to_square(img_data: bytes) -> bytes:
-    """Center-crop a landscape image to square (full height, trim equal sides).
-    Returns the original bytes unchanged if already square or portrait."""
+    """Center-crop a landscape image to square. Returns original bytes if already square/portrait."""
     with Image.open(BytesIO(img_data)) as img:
         w, h = img.size
         if w <= h:
@@ -120,7 +121,7 @@ def _embed_cover(path: str, img_data: bytes) -> None:
 
 
 def _crop_embedded_cover(path: str) -> None:
-    """Extract the embedded cover art, square-crop it, and re-embed."""
+    """Extract embedded cover, square-crop it, and re-embed."""
     try:
         tags = ID3(path)
     except ID3NoHeaderError:
@@ -203,7 +204,7 @@ class _SFTPClient:
 _sftp_client = _SFTPClient()
 
 
-# ── YouTube download ──────────────────────────────────────────────────────────
+# ── downloads ─────────────────────────────────────────────────────────────────
 
 def _ytdlp_bin() -> str:
     b = shutil.which("yt-dlp")
@@ -212,42 +213,72 @@ def _ytdlp_bin() -> str:
     return b
 
 
-def download_youtube_track(video_id: str, dest_dir: str) -> str:
+def download_youtube_track(source_url: str, dest_dir: str) -> str:
     """Download a YouTube video as MP3. Returns absolute path to .mp3."""
-    yt_url = f"https://www.youtube.com/watch?v={video_id}"
+    m = re.search(r"[?&]v=([^&]+)", source_url)
+    video_id = m.group(1) if m else None
     output_tmpl = os.path.join(dest_dir, "%(id)s.%(ext)s")
+
     cookies_args: list[str] = []
     if YOUTUBE_COOKIES_FILE and os.path.exists(YOUTUBE_COOKIES_FILE):
         cookies_args = ["--cookies", YOUTUBE_COOKIES_FILE]
 
     cmd = [
         _ytdlp_bin(),
-        "--extract-audio",
-        "--audio-format", "mp3",
-        "--audio-quality", "0",
-        "--embed-metadata",
-        "--embed-thumbnail",
+        "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0",
+        "--embed-metadata", "--embed-thumbnail",
         "--output", output_tmpl,
-        "--no-playlist",
-        "--quiet",
+        "--no-playlist", "--quiet",
         *cookies_args,
-        yt_url,
+        source_url,
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise RuntimeError(
-            f"yt-dlp failed for {video_id} (exit {result.returncode}):\n"
+            f"yt-dlp failed for {source_url} (exit {result.returncode}):\n"
             f"{result.stderr[-600:]}"
         )
 
-    expected = os.path.join(dest_dir, f"{video_id}.mp3")
-    if os.path.exists(expected):
-        return expected
+    if video_id:
+        expected = os.path.join(dest_dir, f"{video_id}.mp3")
+        if os.path.exists(expected):
+            return expected
     for fname in os.listdir(dest_dir):
         if fname.endswith(".mp3"):
             return os.path.join(dest_dir, fname)
-    raise RuntimeError(f"yt-dlp produced no MP3 for {video_id}")
+    raise RuntimeError(f"yt-dlp produced no MP3 for {source_url}")
+
+
+def download_soundcloud_track(sc_url: str, dest_dir: str) -> str:
+    """Download a SoundCloud track as MP3 via yt-dlp. Returns absolute path to .mp3."""
+    output_tmpl = os.path.join(dest_dir, "%(title)s.%(ext)s")
+
+    cookies_args: list[str] = []
+    if SC_COOKIES_FILE and os.path.exists(SC_COOKIES_FILE):
+        cookies_args = ["--cookies", SC_COOKIES_FILE]
+
+    cmd = [
+        _ytdlp_bin(),
+        "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0",
+        "--embed-metadata", "--embed-thumbnail",
+        "--output", output_tmpl,
+        "--no-playlist", "--quiet",
+        *cookies_args,
+        sc_url,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"yt-dlp failed for {sc_url} (exit {result.returncode}):\n"
+            f"{result.stderr[-600:]}"
+        )
+
+    for fname in os.listdir(dest_dir):
+        if fname.endswith(".mp3"):
+            return os.path.join(dest_dir, fname)
+    raise RuntimeError(f"yt-dlp produced no MP3 for {sc_url}")
 
 
 def retag_mp3(
@@ -257,6 +288,7 @@ def retag_mp3(
     album_artists: list[str] | None = None,
     album: str = "",
     release_year: str = "",
+    track_number: int | None = None,
 ) -> None:
     """Overwrite ID3 text tags, keeping the embedded cover art intact."""
     parts = [str(a).strip() for a in (artists or []) if str(a).strip()]
@@ -273,7 +305,7 @@ def retag_mp3(
         tags["TPE2"] = TPE2(encoding=3, text=aa_parts)
         tags["TALB"] = TALB(encoding=3, text=album)
         tags["TDRC"] = TDRC(encoding=3, text=release_year or "")
-        tags["TRCK"] = TRCK(encoding=3, text="1")
+        tags["TRCK"] = TRCK(encoding=3, text=str(track_number) if track_number else "")
         tags.save(path, v2_version=4)
     except Exception as exc:
         logger.warning("retag_mp3 failed for %s: %s", path, exc)
@@ -287,7 +319,7 @@ def _headers() -> dict:
 
 def api_claim() -> list[dict]:
     r = httpx.post(
-        f"{API_BASE}/yt-queue/claim",
+        f"{API_BASE}/queue/claim",
         json={"worker_id": WORKER_ID, "limit": CLAIM_LIMIT},
         headers=_headers(),
         timeout=15,
@@ -298,7 +330,7 @@ def api_claim() -> list[dict]:
 
 def api_done(job_id: int, remote_path: str) -> None:
     r = httpx.post(
-        f"{API_BASE}/yt-queue/{job_id}/done",
+        f"{API_BASE}/queue/{job_id}/done",
         json={"remote_path": remote_path},
         headers=_headers(),
         timeout=60,
@@ -309,7 +341,7 @@ def api_done(job_id: int, remote_path: str) -> None:
 def api_failed(job_id: int, error: str) -> None:
     try:
         httpx.post(
-            f"{API_BASE}/yt-queue/{job_id}/failed",
+            f"{API_BASE}/queue/{job_id}/failed",
             json={"error": error},
             headers=_headers(),
             timeout=15,
@@ -322,7 +354,12 @@ def api_failed(job_id: int, error: str) -> None:
 
 def process_job(job: dict) -> str:
     """Download, tag, upload one job. Returns the remote SFTP path."""
-    video_id: str = job["video_id"]
+    source: str = job.get("source", "youtube")
+    source_url: str = (
+        job.get("source_url")
+        or f"https://www.youtube.com/watch?v={job['video_id']}"
+    )
+    download_mode: str = job.get("download_mode", "playlist")
     title: str = job["title"]
     artists: list[str] = job.get("artists") or []
     album_artists: list[str] = job.get("album_artists") or artists
@@ -330,11 +367,25 @@ def process_job(job: dict) -> str:
     release_year: str = job.get("release_year") or ""
     cover_art_b64: str | None = job.get("cover_art_b64") or None
     thumbnail: str | None = job.get("thumbnail") or None
-    folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))
+    track_number: int | None = job.get("track_number")
 
-    tmp_dir = tempfile.mkdtemp(prefix="yt_puller_")
+    folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))
+    fname = _safe(title) + ".mp3"
+    if album:
+        remote = str(PurePosixPath(SFTP_BASE) / folder / _safe(album) / fname)
+    else:
+        remote = str(PurePosixPath(SFTP_BASE) / folder / fname)
+
+    tmp_dir = tempfile.mkdtemp(prefix="media_puller_")
     try:
-        mp3_path = download_youtube_track(video_id, tmp_dir)
+        # Download audio
+        if source == "youtube":
+            mp3_path = download_youtube_track(source_url, tmp_dir)
+        elif source == "soundcloud":
+            mp3_path = download_soundcloud_track(source_url, tmp_dir)
+        else:
+            raise ValueError(f"Unknown source: {source!r}")
+
         retag_mp3(
             mp3_path,
             title=title,
@@ -342,27 +393,39 @@ def process_job(job: dict) -> str:
             album_artists=album_artists,
             album=album,
             release_year=release_year,
+            track_number=track_number,
         )
 
-        if cover_art_b64:
-            raw = base64.b64decode(cover_art_b64)
-            _embed_cover(mp3_path, _crop_to_square(raw))
-        elif thumbnail:
-            try:
-                resp = httpx.get(thumbnail, timeout=15, follow_redirects=True)
-                resp.raise_for_status()
-                _embed_cover(mp3_path, _crop_to_square(resp.content))
-            except Exception as exc:
-                logger.warning("Could not fetch thumbnail %s: %s", thumbnail, exc)
+        # Cover art handling
+        if download_mode == "album":
+            cover_b64 = job.get("album_cover_b64") or cover_art_b64
+            if cover_b64:
+                cover_bytes = _crop_to_square(base64.b64decode(cover_b64))
+                _embed_cover(mp3_path, cover_bytes)
+                # Upload cover.jpg once per album folder (idempotent — same bytes each time)
+                album_dir = str(PurePosixPath(remote).parent)
+                cover_remote = f"{album_dir}/cover.jpg"
+                cover_tmp = os.path.join(tmp_dir, "cover.jpg")
+                Path(cover_tmp).write_bytes(cover_bytes)
+                _sftp_client.upload(cover_tmp, cover_remote)
+            else:
                 _crop_embedded_cover(mp3_path)
         else:
-            _crop_embedded_cover(mp3_path)
+            # Playlist mode: per-track cover
+            if cover_art_b64:
+                raw = base64.b64decode(cover_art_b64)
+                _embed_cover(mp3_path, _crop_to_square(raw))
+            elif thumbnail:
+                try:
+                    resp = httpx.get(thumbnail, timeout=15, follow_redirects=True)
+                    resp.raise_for_status()
+                    _embed_cover(mp3_path, _crop_to_square(resp.content))
+                except Exception as exc:
+                    logger.warning("Could not fetch thumbnail %s: %s", thumbnail, exc)
+                    _crop_embedded_cover(mp3_path)
+            else:
+                _crop_embedded_cover(mp3_path)
 
-        fname = _safe(title) + ".mp3"
-        if album:
-            remote = str(PurePosixPath(SFTP_BASE) / folder / _safe(album) / fname)
-        else:
-            remote = str(PurePosixPath(SFTP_BASE) / folder / fname)
         _sftp_client.upload(mp3_path, remote)
         return remote
     finally:
@@ -378,7 +441,7 @@ def run() -> None:
     if missing:
         raise SystemExit(f"Missing required config: {', '.join(missing)} — check .env")
 
-    logger.info("YT puller started (worker=%s  api=%s)", WORKER_ID, API_BASE)
+    logger.info("media_puller started (worker=%s  api=%s)", WORKER_ID, API_BASE)
 
     while True:
         try:
@@ -395,7 +458,7 @@ def run() -> None:
 
         for job in jobs:
             jid: int = job["id"]
-            logger.info("[%d] Processing: %s", jid, job.get("title", "?"))
+            logger.info("[%d] Processing: %s (%s)", jid, job.get("title", "?"), job.get("source", "youtube"))
             try:
                 remote = process_job(job)
                 api_done(jid, remote)
@@ -406,7 +469,7 @@ def run() -> None:
 
 
 def run_once() -> None:
-    """Claim all pending jobs, download them, then exit."""
+    """Claim all pending jobs, process them, then exit."""
     import sys
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -414,7 +477,7 @@ def run_once() -> None:
     if missing:
         raise SystemExit(f"Missing required config: {', '.join(missing)} — check .env")
 
-    logger.info("YT puller (one-shot) started (worker=%s  api=%s)", WORKER_ID, API_BASE)
+    logger.info("media_puller (one-shot) started (worker=%s  api=%s)", WORKER_ID, API_BASE)
 
     total_claimed = 0
     failed = 0
@@ -431,7 +494,7 @@ def run_once() -> None:
         total_claimed += len(jobs)
         for job in jobs:
             jid: int = job["id"]
-            logger.info("[%d] Processing: %s", jid, job.get("title", "?"))
+            logger.info("[%d] Processing: %s (%s)", jid, job.get("title", "?"), job.get("source", "youtube"))
             try:
                 remote = process_job(job)
                 api_done(jid, remote)
@@ -449,7 +512,7 @@ def run_once() -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="YouTube track downloader for metamusic")
+    parser = argparse.ArgumentParser(description="Media track downloader for metamusic")
     parser.add_argument(
         "--daemon",
         action="store_true",
