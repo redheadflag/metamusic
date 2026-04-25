@@ -306,6 +306,9 @@ export default function PlaylistImport({ onBack, onImport }) {
         // Try to pre-fill metadata from the backend; fall back to empty editor
         // if the server lacks YT cookies (bot detection) — user fills in manually.
         const videoId = extractVideoId(trimmed);
+        let meta = null;
+
+        // 1. Try backend (yt-dlp, best metadata)
         try {
           const res = await fetch(`${API}/yt-fetch-video`, {
             method:  "POST",
@@ -313,12 +316,30 @@ export default function PlaylistImport({ onBack, onImport }) {
             body:    JSON.stringify({ url: trimmed }),
           });
           if (!res.ok) throw new Error(await res.text());
-          const data = await res.json();
-          setSingleMeta(data);
-        } catch {
-          // Couldn't fetch metadata — open editor with empty fields
-          setSingleMeta({ video_id: videoId || trimmed, title: "", artists: [], duration: null, thumbnail: null });
+          meta = await res.json();
+        } catch { /* fall through */ }
+
+        // 2. Fall back to YouTube oEmbed (no cookies, always works)
+        if (!meta) {
+          try {
+            const oe = await fetch(
+              `https://www.youtube.com/oembed?url=${encodeURIComponent(trimmed)}&format=json`
+            );
+            if (oe.ok) {
+              const d = await oe.json();
+              meta = {
+                video_id:  videoId || trimmed,
+                title:     d.title || "",
+                artists:   d.author_name ? [d.author_name] : [],
+                duration:  null,
+                thumbnail: d.thumbnail_url || null,
+              };
+            }
+          } catch { /* fall through */ }
         }
+
+        // 3. Empty editor as last resort
+        setSingleMeta(meta ?? { video_id: videoId || trimmed, title: "", artists: [], duration: null, thumbnail: null });
       } else {
         // Playlist — existing scan flow
         const res = await fetch(`${API}/yt-scan`, {
@@ -413,13 +434,6 @@ export default function PlaylistImport({ onBack, onImport }) {
             {scanning ? t("ytScanning") : t("ytScan")}
           </button>
         </div>
-        <input
-          type="text"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          placeholder={t("ytOwnerUsername")}
-          style={{ ...inputStyle, fontSize: 12, opacity: 0.8 }}
-        />
         {error && (
           <p style={{ margin: 0, color: "var(--danger)", fontSize: 13 }}>{error}</p>
         )}
@@ -466,6 +480,15 @@ export default function PlaylistImport({ onBack, onImport }) {
               />
             ))}
           </div>
+
+          {/* Username attribution */}
+          <input
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            placeholder={t("ytOwnerUsername")}
+            style={{ ...inputStyle, fontSize: 12, opacity: 0.8 }}
+          />
 
           {/* Action bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

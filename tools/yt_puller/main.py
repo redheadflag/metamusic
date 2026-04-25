@@ -266,6 +266,8 @@ def retag_mp3(
             tags = ID3(path)
         except ID3NoHeaderError:
             tags = ID3()
+        tags.delall("TCON")
+        tags.delall("COMM")
         tags["TIT2"] = TIT2(encoding=3, text=title)
         tags["TPE1"] = TPE1(encoding=3, text=parts)
         tags["TPE2"] = TPE2(encoding=3, text=aa_parts)
@@ -327,6 +329,7 @@ def process_job(job: dict) -> str:
     album: str = job.get("album") or title
     release_year: str = job.get("release_year") or ""
     cover_art_b64: str | None = job.get("cover_art_b64") or None
+    thumbnail: str | None = job.get("thumbnail") or None
     folder = _safe(album_artists[0] if album_artists else (artists[0] if artists else "Unknown"))
 
     tmp_dir = tempfile.mkdtemp(prefix="yt_puller_")
@@ -344,6 +347,14 @@ def process_job(job: dict) -> str:
         if cover_art_b64:
             raw = base64.b64decode(cover_art_b64)
             _embed_cover(mp3_path, _crop_to_square(raw))
+        elif thumbnail:
+            try:
+                resp = httpx.get(thumbnail, timeout=15, follow_redirects=True)
+                resp.raise_for_status()
+                _embed_cover(mp3_path, _crop_to_square(resp.content))
+            except Exception as exc:
+                logger.warning("Could not fetch thumbnail %s: %s", thumbnail, exc)
+                _crop_embedded_cover(mp3_path)
         else:
             _crop_embedded_cover(mp3_path)
 
