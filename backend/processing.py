@@ -7,7 +7,7 @@ import shutil
 from typing import Any, Optional
 
 from fix_artists import split_artist
-from models import ProcessRequest, ScProcessRequest, TrackMeta
+from models import ProcessRequest, TrackMeta
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +357,7 @@ def process_album(req: ProcessRequest) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-async def process_sc_album(req: ScProcessRequest) -> list[str]:
+async def process_sc_album(req: ProcessRequest) -> list[str]:
     """
     Download SoundCloud tracks, embed metadata + cover art, then upload directly to
       <SFTP_BASE>/<album_artist>/<album>/<filename>

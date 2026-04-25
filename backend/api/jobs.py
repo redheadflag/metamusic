@@ -8,7 +8,6 @@ from models import (
     BulkProcessRequest,
     JobStatus,
     ProcessRequest,
-    ScProcessRequest,
 )
 from worker.settings import get_redis_settings
 
@@ -45,19 +44,6 @@ async def process(req: ProcessRequest):
     logger.info("Enqueued process_album_task as job %s", job.job_id)
     return JobStatus(job_id=job.job_id, status="queued")
 
-
-@router.post("/sc-process", response_model=JobStatus, status_code=202)
-async def sc_process(req: ScProcessRequest):
-    """Enqueue SoundCloud download+store job."""
-    if not req.tracks:
-        raise HTTPException(400, "No tracks provided")
-    if not req.album and not req.is_single:
-        raise HTTPException(400, "album is required")
-
-    redis = await get_redis()
-    job = await redis.enqueue_job("sc_process_task", req.model_dump())
-    logger.info("Enqueued sc_process_task as job %s", job.job_id)
-    return JobStatus(job_id=job.job_id, status="queued")
 
 
 @router.post("/process-bulk", response_model=JobStatus, status_code=202)

@@ -45,33 +45,6 @@ async def process_album_task(ctx, req_dict: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# task: sc_process_task  (POST /api/sc-process)
-# ---------------------------------------------------------------------------
-
-
-async def sc_process_task(ctx, req_dict: dict) -> dict:
-    """Download SoundCloud tracks in native format and store."""
-    from models import ScProcessRequest
-    from processing import process_sc_album
-
-    req = ScProcessRequest(**req_dict)
-
-    logger.info(
-        "[job %s] sc_process_task: artists=%r album=%r tracks=%d",
-        ctx["job_id"],
-        req.artists,
-        req.album,
-        len(req.tracks),
-    )
-
-    saved = await process_sc_album(req)
-    logger.info("[job %s] SC stored (raw): %s", ctx["job_id"], saved)
-
-    await _post_process()
-    return {"saved": saved}
-
-
-# ---------------------------------------------------------------------------
 # task: process_bulk_task  (POST /api/process-bulk)
 # ---------------------------------------------------------------------------
 
@@ -119,7 +92,6 @@ class WorkerSettings:
 
     functions = [
         process_album_task,
-        sc_process_task,
         process_bulk_task,
     ]
 
