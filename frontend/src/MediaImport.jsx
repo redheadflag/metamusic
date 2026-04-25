@@ -246,11 +246,15 @@ export default function MediaImport({ onBack, onImport }) {
     if (!trimmed) return;
     setScanning(true);
     setError(null);
-    setScanResult(null);
-    setTracks([]);
-    setSingleTrack(null);
     setModalIdx(null);
-    setDownloadMode("playlist");
+
+    // Only reset when nothing is displayed yet
+    if (!singleTrack) {
+      setScanResult(null);
+      setTracks([]);
+      setSingleTrack(null);
+      setDownloadMode("playlist");
+    }
 
     try {
       const res = await fetch(`${API}/scan`, {
@@ -262,19 +266,29 @@ export default function MediaImport({ onBack, onImport }) {
       const data = await res.json();
 
       if (data.type === "single" || data.tracks.length === 1) {
-        setSingleTrack(data.tracks[0]);
-        setScanResult(data);
+        if (singleTrack) {
+          // Editor already open — append new result at top of list, keep editor as-is
+          setTracks(prev => [{ ...data.tracks[0], skip: false }, ...prev]);
+        } else {
+          setScanResult(data);
+          setSingleTrack(data.tracks[0]);
+        }
       } else {
         setScanResult(data);
-        setTracks(data.tracks.map(tr => ({ ...tr, skip: false })));
-        const first = data.tracks[0];
-        setAlbumTitle(data.playlist_name || "");
-        setAlbumArtist(
-          (first.album_artists && first.album_artists[0]) ||
-          (first.artists && first.artists[0]) || ""
-        );
-        setAlbumYear(first.release_year || "");
-        setAlbumCover(first.cover_art_b64 || null);
+        const newTracks = data.tracks.map(tr => ({ ...tr, skip: false }));
+        if (singleTrack) {
+          setTracks(prev => [...newTracks, ...prev]);
+        } else {
+          setTracks(newTracks);
+          const first = data.tracks[0];
+          setAlbumTitle(data.playlist_name || "");
+          setAlbumArtist(
+            (first.album_artists && first.album_artists[0]) ||
+            (first.artists && first.artists[0]) || ""
+          );
+          setAlbumYear(first.release_year || "");
+          setAlbumCover(first.cover_art_b64 || null);
+        }
       }
     } catch (e) {
       setError(e.message);
@@ -328,7 +342,7 @@ export default function MediaImport({ onBack, onImport }) {
       source:        scanResult.source,
       playlist_name: scanResult.playlist_name || "",
       download_mode: "playlist",
-      tracks:        [{ ...trackMeta, skip: false }],
+      tracks:        [{ ...trackMeta, skip: false }, ...tracks],
     });
   }
 
@@ -378,8 +392,26 @@ export default function MediaImport({ onBack, onImport }) {
         />
       )}
 
+      {/* Accumulated single tracks (shown below the editor) */}
+      {singleTrack && tracks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontSize: 12, color: "var(--text)", opacity: 0.5 }}>
+            {t("ytTracksFound", tracks.length, tracks.filter(tr => tr.in_navidrome).length)}
+          </span>
+          {tracks.map((track, idx) => (
+            <TrackRow
+              key={track.source_id ?? idx}
+              track={track}
+              onOpenModal={() => setModalIdx(idx)}
+              onChange={changes => updateTrack(idx, changes)}
+              t={t}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Multi-track results */}
-      {scanResult && tracks.length > 0 && (
+      {!singleTrack && scanResult && tracks.length > 0 && (
         <>
           {/* Playlist header */}
           <div style={{
