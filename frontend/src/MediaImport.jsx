@@ -234,7 +234,7 @@ export default function MediaImport({ onBack, onImport }) {
   const [downloadMode, setDownloadMode] = useState("playlist");
 
   // Album mode shared metadata
-  const [albumArtist, setAlbumArtist] = useState("");
+  const [albumArtists, setAlbumArtists] = useState([""]);
   const [albumTitle,  setAlbumTitle]  = useState("");
   const [albumYear,   setAlbumYear]   = useState("");
   const [albumCover,  setAlbumCover]  = useState(null);
@@ -282,9 +282,9 @@ export default function MediaImport({ onBack, onImport }) {
           setTracks(newTracks);
           const first = data.tracks[0];
           setAlbumTitle(data.playlist_name || "");
-          setAlbumArtist(
-            (first.album_artists && first.album_artists[0]) ||
-            (first.artists && first.artists[0]) || ""
+          setAlbumArtists(
+            first.album_artists?.length ? first.album_artists :
+            first.artists?.length ? [first.artists[0]] : [""]
           );
           setAlbumYear(first.release_year || "");
           setAlbumCover(first.cover_art_b64 || null);
@@ -329,7 +329,7 @@ export default function MediaImport({ onBack, onImport }) {
       playlist_name:   scanResult.playlist_name,
       username:        username.trim(),
       download_mode:   "album",
-      album_artist:    albumArtist.trim() || null,
+      album_artist:    albumArtists.map(a => a.trim()).filter(Boolean).join("; ") || null,
       album_title:     albumTitle.trim() || null,
       release_year:    albumYear.trim() || null,
       album_cover_b64: albumCover || null,
@@ -487,14 +487,32 @@ export default function MediaImport({ onBack, onImport }) {
                 </span>
               </div>
 
-              {/* Album artist */}
+              {/* Album artists */}
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <label style={labelStyle}>{t("importAlbumArtist")}</label>
-                <input
-                  value={albumArtist}
-                  onChange={(e) => setAlbumArtist(e.target.value)}
-                  style={fieldInputStyle}
-                />
+                {albumArtists.map((artist, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6 }}>
+                    <input
+                      value={artist}
+                      onChange={(e) => {
+                        const next = [...albumArtists];
+                        next[i] = e.target.value;
+                        setAlbumArtists(next);
+                      }}
+                      style={{ ...fieldInputStyle, flex: 1 }}
+                    />
+                    {albumArtists.length > 1 && (
+                      <button
+                        onClick={() => setAlbumArtists(albumArtists.filter((_, j) => j !== i))}
+                        style={{ background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--text)", opacity: 0.6, padding: "0 8px" }}
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setAlbumArtists([...albumArtists, ""])}
+                  style={{ alignSelf: "flex-start", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--text)", fontSize: 11, padding: "3px 10px", opacity: 0.7 }}
+                >+ artist</button>
               </div>
 
               {/* Album title + Year */}
@@ -526,14 +544,16 @@ export default function MediaImport({ onBack, onImport }) {
             </div>
           )}
 
-          {/* Username */}
-          <input
-            type="text"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder={t("ytOwnerUsername")}
-            style={{ ...inputStyle, fontSize: 12, opacity: 0.8 }}
-          />
+          {/* Username — only relevant for playlist mode */}
+          {downloadMode === "playlist" && (
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder={t("ytOwnerUsername")}
+              style={{ ...inputStyle, fontSize: 12, opacity: 0.8 }}
+            />
+          )}
 
           {/* Action bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
