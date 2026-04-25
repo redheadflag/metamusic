@@ -1,5 +1,5 @@
 """
-SQLite-backed download queue for YouTube tracks.
+SQLite-backed download queue for media tracks (YouTube + SoundCloud).
 
 Path is read from $DOWNLOAD_QUEUE_DB (default /app/data/queue.db).
 """
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 DB_PATH = os.environ.get("DOWNLOAD_QUEUE_DB", "/app/data/queue.db")
 
 _CREATE = """
-CREATE TABLE IF NOT EXISTS yt_downloads (
+CREATE TABLE IF NOT EXISTS media_downloads (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id      TEXT NOT NULL UNIQUE,
     title         TEXT NOT NULL,
@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS yt_downloads (
     duration      INTEGER,
     playlist_id   TEXT,
     playlist_name TEXT,
+    source        TEXT NOT NULL DEFAULT 'youtube',
+    source_url    TEXT,
+    download_mode TEXT NOT NULL DEFAULT 'playlist',
+    album_cover_b64 TEXT,
+    track_number  INTEGER,
     status        TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','claimed','done','failed')),
     claimed_by    TEXT,
@@ -38,15 +43,6 @@ CREATE TABLE IF NOT EXISTS yt_downloads (
 );
 """
 
-_MIGRATE = [
-    "ALTER TABLE yt_downloads ADD COLUMN album_artists TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE yt_downloads ADD COLUMN album TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE yt_downloads ADD COLUMN release_year TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE yt_downloads ADD COLUMN thumbnail TEXT",
-    "ALTER TABLE yt_downloads ADD COLUMN cover_art_b64 TEXT",
-]
-
-
 @contextmanager
 def _conn():
     parent = os.path.dirname(DB_PATH)
@@ -55,12 +51,8 @@ def _conn():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("DROP TABLE IF EXISTS yt_downloads")
     con.execute(_CREATE)
-    for stmt in _MIGRATE:
-        try:
-            con.execute(stmt)
-        except Exception:
-            pass  # column already exists
     try:
         yield con
         con.commit()
@@ -90,16 +82,23 @@ def enqueue(
     duration,
     playlist_id,
     playlist_name,
+    source: str = "youtube",
+    source_url: str | None = None,
+    download_mode: str = "playlist",
+    album_cover_b64: str | None = None,
+    track_number: int | None = None,
 ) -> int:
     """Insert a pending entry; on conflict reset to pending. Returns the row id."""
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as con:
         cur = con.execute(
             """
-            INSERT INTO yt_downloads
+            INSERT INTO media_downloads
                 (video_id, title, artists, album_artists, album, release_year, thumbnail,
-                 cover_art_b64, duration, playlist_id, playlist_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cover_art_b64, duration, playlist_id, playlist_name,
+                 source, source_url, download_mode, album_cover_b64, track_number,
+                 created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 title=excluded.title,
                 artists=excluded.artists,
@@ -108,6 +107,11 @@ def enqueue(
                 release_year=excluded.release_year,
                 thumbnail=excluded.thumbnail,
                 cover_art_b64=excluded.cover_art_b64,
+                source=excluded.source,
+                source_url=excluded.source_url,
+                download_mode=excluded.download_mode,
+                album_cover_b64=excluded.album_cover_b64,
+                track_number=excluded.track_number,
                 status='pending',
                 error=NULL,
                 claimed_by=NULL,
@@ -127,6 +131,11 @@ def enqueue(
                 duration,
                 playlist_id,
                 playlist_name,
+                source,
+                source_url,
+                download_mode,
+                album_cover_b64,
+                track_number,
                 now,
             ),
         )
@@ -138,7 +147,7 @@ def claim(limit: int, worker_id: str) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as con:
         rows = con.execute(
-            "SELECT id FROM yt_downloads WHERE status='pending' LIMIT ?",
+            "SELECT id FROM media_downloads WHERE status='pending' LIMIT ?",
             (limit,),
         ).fetchall()
         ids = [r["id"] for r in rows]
@@ -146,12 +155,12 @@ def claim(limit: int, worker_id: str) -> list[dict]:
             return []
         ph = ",".join("?" * len(ids))
         con.execute(
-            f"UPDATE yt_downloads SET status='claimed', claimed_by=?, claimed_at=?"
+            f"UPDATE media_downloads SET status='claimed', claimed_by=?, claimed_at=?"
             f" WHERE id IN ({ph})",
             [worker_id, now, *ids],
         )
         result = con.execute(
-            f"SELECT * FROM yt_downloads WHERE id IN ({ph})", ids
+            f"SELECT * FROM media_downloads WHERE id IN ({ph})", ids
         ).fetchall()
     return [_to_dict(r) for r in result]
 
@@ -160,7 +169,7 @@ def mark_done(row_id: int, remote_path: str, navidrome_id) -> None:
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as con:
         con.execute(
-            "UPDATE yt_downloads SET status='done', done_at=?, remote_path=?, navidrome_id=?"
+            "UPDATE media_downloads SET status='done', done_at=?, remote_path=?, navidrome_id=?"
             " WHERE id=?",
             (now, remote_path, navidrome_id, row_id),
         )
@@ -169,7 +178,7 @@ def mark_done(row_id: int, remote_path: str, navidrome_id) -> None:
 def mark_failed(row_id: int, error: str) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE yt_downloads SET status='failed', error=? WHERE id=?",
+            "UPDATE media_downloads SET status='failed', error=? WHERE id=?",
             (error, row_id),
         )
 
@@ -177,7 +186,7 @@ def mark_failed(row_id: int, error: str) -> None:
 def get_by_id(row_id: int) -> dict | None:
     with _conn() as con:
         row = con.execute(
-            "SELECT * FROM yt_downloads WHERE id=?", (row_id,)
+            "SELECT * FROM media_downloads WHERE id=?", (row_id,)
         ).fetchone()
     return _to_dict(row) if row else None
 
@@ -186,11 +195,11 @@ def list_all(status: str | None = None) -> list[dict]:
     with _conn() as con:
         if status:
             rows = con.execute(
-                "SELECT * FROM yt_downloads WHERE status=? ORDER BY created_at",
+                "SELECT * FROM media_downloads WHERE status=? ORDER BY created_at",
                 (status,),
             ).fetchall()
         else:
             rows = con.execute(
-                "SELECT * FROM yt_downloads ORDER BY created_at"
+                "SELECT * FROM media_downloads ORDER BY created_at"
             ).fetchall()
     return [_to_dict(r) for r in rows]
