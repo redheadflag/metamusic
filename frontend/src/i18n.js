@@ -17,13 +17,6 @@ export const translations = {
     dropSub:          "audio files or .zip albums",
     clickBrowse:      "click to browse",
 
-    // ScInput
-    scUrlLabel:       "SoundCloud URL",
-    scUrlPlaceholder: "https://soundcloud.com/artist or /artist/track or /artist/sets/album",
-    scTypeTrack:      "Single track",
-    scTypePlaylist:   "Playlist / album",
-    scTypeArtist:     "Artist profile — fetches all albums and tracks",
-    scTypeInvalid:    "Enter a valid SoundCloud URL",
     back:             "← Back",
     fetch:            "Fetch",
     fetchingArtist:   "Fetching artist profile…",
@@ -58,11 +51,23 @@ export const translations = {
     requestBody:      "List the artists, albums, or tracks you'd like added to the server. Please include only content you actually listen to — server space is not unlimited.",
     close:            "Close",
 
-    // YouTube (ModeSelector)
+    // Media import (ModeSelector)
+    mediaImport:      "YouTube / SoundCloud",
+    mediaImportHint:  "Paste a YouTube or SoundCloud link — track or playlist, downloaded in the background",
+
+    // MediaImport component
+    importUrl:            "YouTube / SoundCloud URL",
+    importUrlPlaceholder: "youtube.com/… or soundcloud.com/…",
+    importModePlaylist:   "Playlist",
+    importModeAlbum:      "Album",
+    importAlbumArtist:    "Album artist",
+    importAlbumCoverHint: "Saved as cover.jpg in the album folder",
+
+    // YouTube (ModeSelector — kept for compatibility)
     ytImport:         "Load from YouTube",
     ytImportHint:     "Download a track or playlist — added to library in the background",
 
-    // PlaylistImport component
+    // MediaImport component
     ytPlaylistUrl:    "YouTube URL",
     ytUrlPlaceholder: "youtube.com/watch?v=… or music.youtube.com/playlist?list=…",
     ytScan:           "Load",
@@ -116,13 +121,6 @@ export const translations = {
     dropSub:          "аудиофайлы или .zip-архивы альбомов",
     clickBrowse:      "нажмите для выбора",
 
-    // ScInput
-    scUrlLabel:       "Ссылка SoundCloud",
-    scUrlPlaceholder: "https://soundcloud.com/artist или /artist/track или /artist/sets/album",
-    scTypeTrack:      "Отдельный трек",
-    scTypePlaylist:   "Плейлист / альбом",
-    scTypeArtist:     "Профиль исполнителя — загружает все альбомы и треки",
-    scTypeInvalid:    "Введите корректную ссылку SoundCloud",
     back:             "← Назад",
     fetch:            "Загрузить",
     fetchingArtist:   "Загружаю профиль исполнителя…",
@@ -157,11 +155,23 @@ export const translations = {
     requestBody:      "Укажите список исполнителей, альбомов или треков, которые вы хотели бы видеть на сервере. Просьба включать только то, что вы действительно слушаете — место на сервере ограничено.",
     close:            "Закрыть",
 
-    // YouTube (ModeSelector)
+    // Media import (ModeSelector)
+    mediaImport:      "YouTube / SoundCloud",
+    mediaImportHint:  "Вставьте ссылку YouTube или SoundCloud — трек или плейлист, скачается в фоне",
+
+    // MediaImport component
+    importUrl:            "Ссылка YouTube / SoundCloud",
+    importUrlPlaceholder: "youtube.com/… или soundcloud.com/…",
+    importModePlaylist:   "Плейлист",
+    importModeAlbum:      "Альбом",
+    importAlbumArtist:    "Исполнитель альбома",
+    importAlbumCoverHint: "Сохраняется как cover.jpg в папке альбома",
+
+    // YouTube (ModeSelector — kept for compatibility)
     ytImport:         "Загрузить с YouTube",
     ytImportHint:     "Скачать трек или плейлист — добавляется в библиотеку в фоне",
 
-    // PlaylistImport component
+    // MediaImport component
     ytPlaylistUrl:    "Ссылка YouTube",
     ytUrlPlaceholder: "youtube.com/watch?v=… или music.youtube.com/playlist?list=…",
     ytScan:           "Загрузить",

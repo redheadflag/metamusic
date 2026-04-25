@@ -16,26 +16,18 @@ const modes = [
     hintKey:  "fromFilesHint",
   },
   {
-    id: "soundcloud",
+    id: "import",
     icon: (
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 18a3 3 0 0 1 0-6h.5A5.5 5.5 0 0 1 14 9.5V9a4 4 0 0 1 8 0v.5A4.5 4.5 0 0 1 17.5 18H3z"/>
+        <circle cx="18" cy="5" r="3"/>
+        <circle cx="6"  cy="12" r="3"/>
+        <circle cx="18" cy="19" r="3"/>
+        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
       </svg>
     ),
-    labelKey: "soundcloud",
-    hintKey:  "soundcloudHint",
-  },
-  {
-    id: "youtube",
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="6" width="20" height="14" rx="3"/>
-        <path d="M10 9.5l5 2.5-5 2.5V9.5z" fill="currentColor" stroke="none"/>
-        <path d="M8 3h8"/>
-      </svg>
-    ),
-    labelKey: "ytImport",
-    hintKey:  "ytImportHint",
+    labelKey: "mediaImport",
+    hintKey:  "mediaImportHint",
   },
 ];
 

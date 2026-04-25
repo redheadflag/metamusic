@@ -9,7 +9,12 @@ const STATUS_COLOR = {
   failed:  "var(--danger)",
 };
 
-export default function YtQueuePanel({ onBack }) {
+const SOURCE_LABEL = {
+  youtube:    "YT",
+  soundcloud: "SC",
+};
+
+export default function QueuePanel({ onBack }) {
   const [items,   setItems]   = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -18,7 +23,7 @@ export default function YtQueuePanel({ onBack }) {
 
     async function load() {
       try {
-        const res = await fetch(`${API}/yt-queue`);
+        const res = await fetch(`${API}/queue`);
         if (res.ok && active) setItems(await res.json());
       } catch {}
       if (active) setLoading(false);
@@ -78,43 +83,34 @@ export default function YtQueuePanel({ onBack }) {
             <div
               key={item.id}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "7px 10px",
-                borderRadius: "var(--radius)",
-                border: "1px solid var(--border)",
-                fontSize: 12,
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "7px 10px", borderRadius: "var(--radius)",
+                border: "1px solid var(--border)", fontSize: 12,
               }}
             >
               <span style={{
-                flexShrink: 0,
-                fontWeight: 600,
+                flexShrink: 0, fontWeight: 600,
                 color: STATUS_COLOR[item.status] || "var(--text)",
-                width: 52,
-                textTransform: "uppercase",
-                fontSize: 10,
-                letterSpacing: "0.05em",
+                width: 52, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.05em",
               }}>
                 {item.status}
               </span>
               <span style={{
-                flex: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                color: "var(--text-h)",
+                flexShrink: 0, fontSize: 10, fontWeight: 600,
+                color: "var(--text)", opacity: 0.4,
+                width: 20, textTransform: "uppercase",
+              }}>
+                {SOURCE_LABEL[item.source] || ""}
+              </span>
+              <span style={{
+                flex: 1, overflow: "hidden", textOverflow: "ellipsis",
+                whiteSpace: "nowrap", color: "var(--text-h)",
               }}>
                 {item.title}
               </span>
               <span style={{
-                flexShrink: 0,
-                color: "var(--text)",
-                opacity: 0.5,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                maxWidth: 160,
+                flexShrink: 0, color: "var(--text)", opacity: 0.5,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160,
               }}>
                 {(item.artists || []).join(", ")}
               </span>
@@ -122,13 +118,8 @@ export default function YtQueuePanel({ onBack }) {
                 <span
                   title={item.error}
                   style={{
-                    flexShrink: 0,
-                    color: "var(--danger)",
-                    fontSize: 11,
-                    maxWidth: 200,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    flexShrink: 0, color: "var(--danger)", fontSize: 11,
+                    maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}
                 >
                   {item.error}

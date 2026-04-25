@@ -2,11 +2,10 @@ import { useState } from "react";
 import { LangProvider, useLang } from "./LangContext.jsx";
 import ModeSelector    from "./ModeSelector.jsx";
 import UploadZone      from "./UploadZone.jsx";
-import ScInput         from "./ScInput.jsx";
 import MetaEditor      from "./MetaEditor.jsx";
 import BulkEditor      from "./BulkEditor.jsx";
-import PlaylistImport  from "./PlaylistImport.jsx";
-import YtQueuePanel    from "./YtQueuePanel.jsx";
+import MediaImport     from "./MediaImport.jsx";
+import QueuePanel      from "./QueuePanel.jsx";
 
 const API = "/api";
 
@@ -116,23 +115,23 @@ async function enqueueJob(url, body) {
 
 // ── App (inner — needs useLang) ───────────────────────────────────────────────
 
-// mode:  null | "files" | "soundcloud" | "youtube"
-// state: "idle" | "uploading" | "sc-input" | "sc-fetching" | "editing"
-//      | "bulk-editing" | "yt-input" | "saving" | "sent" | "done" | "error"
+// mode:  null | "files" | "import"
+// state: "idle" | "uploading" | "media-input" | "editing"
+//      | "bulk-editing" | "saving" | "sent" | "done" | "error"
 
 function AppInner() {
   const { t } = useLang();
 
-  const [mode,           setMode]           = useState(null);
-  const [state,          setState]          = useState("idle");
-  const [progress,       setProgress]       = useState(0);
-  const [jobStatus,      setJobStatus]      = useState(null);
-  const [tracks,         setTracks]         = useState([]);
-  const [albums,         setAlbums]         = useState([]);
-  const [saved,          setSaved]          = useState([]);
-  const [error,          setError]          = useState(null);
-  const [ytImportStats,  setYtImportStats]  = useState(null);
-  const [showQueue,      setShowQueue]      = useState(false);
+  const [mode,         setMode]         = useState(null);
+  const [state,        setState]        = useState("idle");
+  const [progress,     setProgress]     = useState(0);
+  const [jobStatus,    setJobStatus]    = useState(null);
+  const [tracks,       setTracks]       = useState([]);
+  const [albums,       setAlbums]       = useState([]);
+  const [saved,        setSaved]        = useState([]);
+  const [error,        setError]        = useState(null);
+  const [importStats,  setImportStats]  = useState(null);
+  const [showQueue,    setShowQueue]    = useState(false);
 
   // ── file upload ────────────────────────────────────────────────────────
   async function handleFiles(files, type) {
@@ -158,32 +157,6 @@ function AppInner() {
     }
   }
 
-  // ── SoundCloud fetch ───────────────────────────────────────────────────
-  async function handleScFetch(url, type) {
-    setState("sc-fetching");
-    setError(null);
-    try {
-      const endpoint = type === "artist" ? `${API}/sc-fetch-artist` : `${API}/sc-fetch`;
-      const res = await fetch(endpoint, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ url }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      if (type === "artist") {
-        setAlbums(data);
-        setState("bulk-editing");
-      } else {
-        setTracks(data);
-        setState("editing");
-      }
-    } catch (e) {
-      setState("sc-input");
-      throw e;
-    }
-  }
-
   // ── remove album from bulk edit ────────────────────────────────────────
   async function handleRemoveAlbum(album) {
     const tempPaths = (album.tracks || []).map((t) => t.temp_path).filter(Boolean);
@@ -199,16 +172,16 @@ function AppInner() {
     }
   }
 
-  // ── YouTube playlist import ───────────────────────────────────────────
-  async function handleYtImport(importReq) {
+  // ── Media import (YouTube + SoundCloud) ──────────────────────────────
+  async function handleMediaImport(importReq) {
     const queued      = importReq.tracks.filter(t => !t.in_navidrome && !t.skip).length;
     const inNavidrome = importReq.tracks.filter(t => t.in_navidrome).length;
-    setYtImportStats({ queued, inNavidrome });
+    setImportStats({ queued, inNavidrome });
     setShowQueue(false);
     setState("saving");
     setError(null);
     try {
-      await enqueueJob(`${API}/yt-import`, importReq);
+      await enqueueJob(`${API}/import`, importReq);
       setState("sent");
     } catch (e) {
       setError(e.message);
@@ -253,7 +226,7 @@ function AppInner() {
     setProgress(0); setJobStatus(null);
     setState("idle");
     setError(null);
-    setYtImportStats(null);
+    setImportStats(null);
     setShowQueue(false);
   }
 
@@ -297,8 +270,7 @@ function AppInner() {
       {state === "idle" && !mode && (
         <ModeSelector onSelect={(m) => {
           setMode(m);
-          if (m === "soundcloud") setState("sc-input");
-          if (m === "youtube")    setState("yt-input");
+          if (m === "import") setState("media-input");
         }} />
       )}
 
@@ -307,27 +279,15 @@ function AppInner() {
         <UploadZone onFiles={handleFiles} onBack={() => { setMode(null); }} />
       )}
 
-      {/* SoundCloud mode */}
-      {state === "sc-input" && (
-        <ScInput
-          onFetch={handleScFetch}
+      {/* Unified media import (YouTube + SoundCloud) */}
+      {state === "media-input" && !showQueue && (
+        <MediaImport
           onBack={() => { setMode(null); setState("idle"); }}
+          onImport={handleMediaImport}
         />
       )}
-
-      {state === "sc-fetching" && (
-        <p style={{ color: "var(--text)", opacity: 0.5 }}>{t("fetchingSc")}</p>
-      )}
-
-      {/* YouTube playlist import */}
-      {state === "yt-input" && !showQueue && (
-        <PlaylistImport
-          onBack={() => { setMode(null); setState("idle"); }}
-          onImport={handleYtImport}
-        />
-      )}
-      {state === "yt-input" && showQueue && (
-        <YtQueuePanel onBack={() => setShowQueue(false)} />
+      {state === "media-input" && showQueue && (
+        <QueuePanel onBack={() => setShowQueue(false)} />
       )}
 
       {/* Upload progress */}
@@ -358,17 +318,14 @@ function AppInner() {
             {t("jobSentTitle")}
           </p>
           <p style={{ fontSize: 13, color: "var(--text)", opacity: 0.6, margin: 0 }}>
-            {ytImportStats
-              ? t("ytQueued", ytImportStats.queued, ytImportStats.inNavidrome)
+            {importStats
+              ? t("ytQueued", importStats.queued, importStats.inNavidrome)
               : t("jobSentNote")}
           </p>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={reset}>{t("goBack")}</button>
-            {ytImportStats && (
-              <button
-                onClick={() => setShowQueue(true)}
-                style={{ opacity: 0.7 }}
-              >
+            {importStats && (
+              <button onClick={() => setShowQueue(true)} style={{ opacity: 0.7 }}>
                 {t("ytViewQueue")}
               </button>
             )}
@@ -376,7 +333,7 @@ function AppInner() {
         </div>
       )}
       {state === "sent" && showQueue && (
-        <YtQueuePanel onBack={() => setShowQueue(false)} />
+        <QueuePanel onBack={() => setShowQueue(false)} />
       )}
 
       {state === "done" && (
