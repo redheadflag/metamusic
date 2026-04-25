@@ -220,7 +220,7 @@ def _parse_playlist(playlist: dict) -> dict:
 
 def resolve_url(sc_url: str) -> list[dict]:
     """
-    Resolve any SoundCloud URL and return a list of track dicts.
+    Resolve any SoundCloud URL and return a list of parsed track dicts.
     Works for single tracks and playlists/sets/albums.
     """
     data = _get("/resolve", {"url": sc_url})
@@ -233,6 +233,7 @@ def resolve_url(sc_url: str) -> list[dict]:
     if kind == "playlist":
         tracks_raw = data.get("tracks") or []
         full_tracks = []
+        total = len(tracks_raw)
         for i, t in enumerate(tracks_raw, 1):
             if "title" not in t:
                 try:
@@ -240,8 +241,93 @@ def resolve_url(sc_url: str) -> list[dict]:
                 except Exception as e:
                     logger.warning("Could not fetch track %s: %s", t.get("id"), e)
                     continue
-            full_tracks.append((t, i, len(tracks_raw)))
+            full_tracks.append(_parse_track(t, i, total))
         return full_tracks
+
+    raise ValueError(f"Unsupported SoundCloud resource kind: {kind!r}")
+
+
+def _parse_track_for_scan(raw: dict, index: int, total: int) -> dict:
+    """Parse a raw SC track dict into fields needed for MediaTrackScan."""
+    from fix_artists import split_artist
+
+    pub_meta = raw.get("publisher_metadata") or {}
+
+    title = pub_meta.get("release_title") or raw.get("title") or "Unknown Track"
+    artist_raw = (
+        pub_meta.get("artist")
+        or raw.get("user", {}).get("username")
+        or "Unknown Artist"
+    )
+    artists = split_artist(artist_raw) or [artist_raw.strip()]
+    album = pub_meta.get("album_title") or ""
+
+    release_date = (
+        pub_meta.get("release_date") or pub_meta.get("p_line_for_display") or ""
+    )
+    release_year = (
+        release_date[:4] if release_date else (raw.get("created_at") or "")[:4]
+    )
+
+    sc_url = raw.get("permalink_url") or ""
+    # Use the last two path segments as source_id (e.g. "artist/track-slug")
+    parts = sc_url.rstrip("/").split("/")
+    source_id = "/".join(parts[-2:]) if len(parts) >= 2 else str(raw.get("id", ""))
+
+    duration_ms = raw.get("duration")
+    duration = int(duration_ms) // 1000 if duration_ms else None
+
+    artwork_url = raw.get("artwork_url") or raw.get("user", {}).get("avatar_url")
+    thumbnail = (
+        re.sub(r"-(large|small|badge|tiny|crop)\b", "-t500x500", artwork_url)
+        if artwork_url else None
+    )
+    cover_bytes = _fetch_cover_cached(artwork_url)
+    cover_b64 = base64.b64encode(cover_bytes).decode() if cover_bytes else None
+
+    return dict(
+        source_id=source_id,
+        source_url=sc_url,
+        title=title,
+        artists=artists,
+        album_artists=artists,
+        album=album,
+        release_year=release_year,
+        duration=duration,
+        thumbnail=thumbnail,
+        cover_art_b64=cover_b64,
+        track_number=index if total > 1 else None,
+    )
+
+
+def resolve_for_scan(sc_url: str) -> dict:
+    """
+    Resolve a SoundCloud URL for the /api/scan endpoint.
+    Returns {'kind': 'single'|'playlist', 'playlist_name': str, 'tracks': [dict]}
+    where each dict has fields matching MediaTrackScan.
+    """
+    data = _get("/resolve", {"url": sc_url})
+    kind = data.get("kind")
+    logger.info("Resolved %s → kind=%s id=%s", sc_url, kind, data.get("id"))
+
+    if kind == "track":
+        track = _parse_track_for_scan(data, 1, 1)
+        return {"kind": "single", "playlist_name": track["title"], "tracks": [track]}
+
+    if kind == "playlist":
+        tracks_raw = data.get("tracks") or []
+        full_tracks = []
+        total = len(tracks_raw)
+        for i, t in enumerate(tracks_raw, 1):
+            if "title" not in t:
+                try:
+                    t = _get(f"/tracks/{t['id']}")
+                except Exception as e:
+                    logger.warning("Could not fetch track %s: %s", t.get("id"), e)
+                    continue
+            full_tracks.append(_parse_track_for_scan(t, i, total))
+        playlist_name = data.get("title") or "SoundCloud Playlist"
+        return {"kind": "playlist", "playlist_name": playlist_name, "tracks": full_tracks}
 
     raise ValueError(f"Unsupported SoundCloud resource kind: {kind!r}")
 
